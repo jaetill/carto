@@ -1,4 +1,6 @@
 import { Auth } from 'aws-amplify';
+import { DEBUG_MODE } from '../config.js';
+import { mockEngagements, mockEngagementData, mockSnapshots, MOCK_ENG_ID } from './mockScenario.js';
 
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
@@ -33,14 +35,25 @@ async function apiPost(path, body) {
 // ── Engagements ───────────────────────────────────────────
 
 export let engagements = [];
+let mockMode = false;
+
+export function isMockMode() { return mockMode; }
+
+export async function loadMockScenario() {
+  mockMode = true;
+  engagements = mockEngagements;
+  return engagements;
+}
 
 export async function loadEngagements() {
+  if (DEBUG_MODE) return loadMockScenario();
   const data = await apiGet('/engagements');
   engagements = data || [];
   return engagements;
 }
 
 export async function saveEngagements(updated) {
+  if (mockMode) { engagements = updated; return; }
   await apiPost('/engagements', updated);
   engagements = updated;
 }
@@ -48,20 +61,24 @@ export async function saveEngagements(updated) {
 // ── Engagement data (hosts + notes) ──────────────────────
 
 export async function loadEngagementData(engagementId) {
+  if (mockMode) return mockEngagementData[MOCK_ENG_ID] || { hosts: [], notes: [] };
   return await apiGet(`/engagement/${engagementId}/data`) || { hosts: [], notes: [] };
 }
 
 export async function saveEngagementData(engagementId, data) {
+  if (mockMode) { if (mockEngagementData[MOCK_ENG_ID]) mockEngagementData[MOCK_ENG_ID] = data; return; }
   await apiPost(`/engagement/${engagementId}/data`, data);
 }
 
 // ── Snapshots ─────────────────────────────────────────────
 
 export async function loadSnapshots(engagementId) {
+  if (mockMode) return mockSnapshots[MOCK_ENG_ID] || [];
   return await apiGet(`/engagement/${engagementId}/snapshots`) || [];
 }
 
 export async function saveSnapshots(engagementId, snapshots) {
+  if (mockMode) { if (mockSnapshots[MOCK_ENG_ID]) mockSnapshots[MOCK_ENG_ID] = snapshots; return; }
   await apiPost(`/engagement/${engagementId}/snapshots`, snapshots);
 }
 

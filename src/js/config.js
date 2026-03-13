@@ -1,3 +1,5 @@
+export const DEBUG_MODE = false;
+
 export default {
   Auth: {
     region: 'us-east-2',

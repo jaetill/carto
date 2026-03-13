@@ -1,6 +1,7 @@
-import { engagements, saveEngagements, newEngagement } from '../data/index.js';
+import { engagements, saveEngagements, newEngagement, loadMockScenario, isMockMode } from '../data/index.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
+import { DEBUG_MODE } from '../config.js';
 
 export function renderEngagements() {
   const container = document.getElementById('app-content');
@@ -26,7 +27,27 @@ export function renderEngagements() {
     empty.className = 'text-slate-400 text-sm text-center py-12';
     empty.textContent = 'No engagements yet.';
     container.appendChild(empty);
+
+    if (DEBUG_MODE && !isMockMode()) {
+      const mockBtn = btn('Load Mock Scenario', 'ghost');
+      mockBtn.className += ' block mx-auto text-indigo-500 text-sm';
+      mockBtn.onclick = async () => {
+        await loadMockScenario();
+        renderEngagements();
+      };
+      container.appendChild(mockBtn);
+    }
     return;
+  }
+
+  if (DEBUG_MODE && !isMockMode()) {
+    const mockBtn = btn('Load Mock Scenario', 'ghost');
+    mockBtn.className += ' text-xs text-slate-400 hover:text-indigo-500 mb-3 block';
+    mockBtn.onclick = async () => {
+      await loadMockScenario();
+      renderEngagements();
+    };
+    container.appendChild(mockBtn);
   }
 
   const active = engagements.filter(e => e.status === 'active');
