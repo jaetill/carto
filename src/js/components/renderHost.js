@@ -99,7 +99,8 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     // Snapshots
     const hostSnaps = snapshots
       .filter(s => s.hostId === hostId)
-      .sort((a, b) => b.timestamp - a.timestamp);
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .map(ensureParsed);
 
     if (hostSnaps.length > 0) {
       const snapsLabel = document.createElement('span');
@@ -405,6 +406,19 @@ function renderParsedSummary(card, snap) {
     el.textContent = `${entries.length} ARP ${entries.length === 1 ? 'entry' : 'entries'}`;
     card.appendChild(el);
   }
+}
+
+function ensureParsed(snap) {
+  if (snap.parsed !== null && snap.parsed !== undefined) return snap;
+  let parsed = null;
+  try {
+    if (snap.commandType === 'netstat')  parsed = parseNetstat(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'pslist')   parsed = parsePslist(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'ipconfig') parsed = parseIpconfig(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'uname')    parsed = parseUname(snap.rawOutput);
+    if (snap.commandType === 'arp')      parsed = parseArp(snap.rawOutput);
+  } catch (e) { console.warn('Parse error:', e); }
+  return { ...snap, parsed };
 }
 
 function formatDiffItems(type, items) {
