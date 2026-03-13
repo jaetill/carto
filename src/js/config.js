@@ -1,7 +1,7 @@
 export default {
   Auth: {
     region: 'us-east-2',
-    userPoolId: 'PLACEHOLDER',
-    userPoolWebClientId: 'PLACEHOLDER',
+    userPoolId: 'us-east-2_yztvpLyo6',
+    userPoolWebClientId: 'u7mfkb5p5edb5fn358bavfbgl',
   }
 };

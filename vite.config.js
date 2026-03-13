@@ -7,7 +7,7 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   plugins: [tailwindcss()],
-  base: '/',
+  base: '/carto/',
   build: {
     rollupOptions: {
       input: {

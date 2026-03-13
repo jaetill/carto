@@ -1,6 +1,6 @@
 import { Auth } from 'aws-amplify';
 
-const API_URL = 'PLACEHOLDER'; // API Gateway URL
+const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
 // ── API helpers ───────────────────────────────────────────
 
