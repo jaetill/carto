@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* ── Design tokens ─────────────────────────────────────────── */
+@theme {
+  --color-primary:       #4f46e5;
+  --color-primary-hover: #4338ca;
+  --color-surface:       #f8fafc;
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', monospace;
+}
+
+body {
+  background-color: #f8fafc;
+  font-family: var(--font-sans);
+}
+
+@layer components {
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 font-medium rounded-lg text-sm
+           transition-colors cursor-pointer px-3 py-1.5 border-0 outline-none;
+  }
+  .btn:focus-visible { @apply ring-2 ring-offset-1 ring-indigo-400; }
+  .btn-primary   { @apply bg-indigo-600 hover:bg-indigo-700 text-white; }
+  .btn-secondary { @apply bg-white hover:bg-slate-50 text-slate-700 ring-1 ring-inset ring-slate-200; }
+  .btn-danger    { @apply bg-red-50 hover:bg-red-100 text-red-700; }
+  .btn-ghost     { @apply bg-transparent hover:bg-slate-100 text-slate-600; }
+  .btn-success   { @apply bg-emerald-50 hover:bg-emerald-100 text-emerald-700; }
+
+  /* Inputs */
+  .field {
+    @apply w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white
+           focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent;
+  }
+  .field-mono {
+    @apply w-full border border-slate-300 rounded-lg px-3 py-2 bg-white
+           focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent
+           font-mono text-xs;
+  }
+
+  /* Cards */
+  .card { @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-4 mb-3; }
+
+  /* Status badges */
+  .badge         { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold; }
+  .badge-active  { @apply bg-emerald-100 text-emerald-700; }
+  .badge-closed  { @apply bg-slate-100 text-slate-500; }
+  .badge-compromised { @apply bg-red-100 text-red-700; }
+  .badge-observed    { @apply bg-amber-100 text-amber-700; }
+  .badge-unknown     { @apply bg-slate-100 text-slate-500; }
+
+  /* Section label */
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 block;
+  }
+
+  /* Diff highlighting */
+  .diff-added   { @apply bg-emerald-50 text-emerald-800; }
+  .diff-removed { @apply bg-red-50 text-red-800; }
+  .diff-changed { @apply bg-amber-50 text-amber-800; }
+
+  /* Toast */
+  .toast {
+    @apply flex items-start gap-2 bg-white shadow-lg rounded-xl px-4 py-3 text-sm
+           border-l-4 min-w-60 max-w-xs;
+    animation: slide-in 0.2s ease-out;
+  }
+  .toast-success { @apply border-emerald-500; }
+  .toast-error   { @apply border-red-500; }
+  .toast-info    { @apply border-indigo-400; }
+
+  /* Modal */
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/40 z-40 flex items-center justify-center p-4;
+  }
+  .modal-box {
+    @apply bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 z-50;
+  }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(1rem); }
+  to   { opacity: 1; transform: translateX(0); }
+}
