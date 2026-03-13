@@ -10,6 +10,8 @@ function clearError()   { errorEl.textContent = ''; errorEl.classList.add('hidde
 function show(id) { document.getElementById(id).classList.remove('hidden'); }
 function hide(id) { document.getElementById(id).classList.add('hidden'); }
 
+let pendingUser = null;
+
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   clearError();
@@ -19,12 +21,36 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   btn.textContent = 'Signing in…';
   try {
-    await Auth.signIn(username, password);
-    window.location.href = 'index.html';
+    const user = await Auth.signIn(username, password);
+    if (user.challengeName === 'NEW_PASSWORD_REQUIRED') {
+      pendingUser = user;
+      hide('login-form');
+      show('force-change-form');
+      document.getElementById('force-new-password').focus();
+    } else {
+      window.location.href = 'index.html';
+    }
   } catch (err) {
     showError(err.message || 'Sign in failed. Please try again.');
     btn.disabled = false;
     btn.textContent = 'Sign In';
+  }
+});
+
+document.getElementById('force-change-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearError();
+  const btn         = document.getElementById('force-change-btn');
+  const newPassword = document.getElementById('force-new-password').value;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    await Auth.completeNewPassword(pendingUser, newPassword);
+    window.location.href = 'index.html';
+  } catch (err) {
+    showError(err.message || 'Could not set password. Please try again.');
+    btn.disabled = false;
+    btn.textContent = 'Set password';
   }
 });
 
