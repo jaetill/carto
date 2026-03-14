@@ -114,7 +114,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     tabBar.className = 'flex gap-1 border-b border-slate-200 mb-4';
 
     [
-      { id: 'current',   label: 'Current State' },
+      { id: 'current',   label: 'Latest State' },
       { id: 'snapshots', label: `Snapshots (${hostSnaps.length})` },
       { id: 'notes',     label: `Notes (${hostNotes.length})` },
     ].forEach(({ id, label }) => {
