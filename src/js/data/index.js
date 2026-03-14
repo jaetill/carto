@@ -8,7 +8,7 @@ const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
 // ── API helpers ───────────────────────────────────────────
 
-async function apiGet(path) {
+export async function apiGet(path) {
   const session = await Auth.currentSession();
   const token   = session.getIdToken().getJwtToken();
   const res = await fetch(`${API_URL}${path}`, {
@@ -19,7 +19,7 @@ async function apiGet(path) {
   return res.json();
 }
 
-async function apiPost(path, body) {
+export async function apiPost(path, body) {
   const session = await Auth.currentSession();
   const token   = session.getIdToken().getJwtToken();
   const res = await fetch(`${API_URL}${path}`, {

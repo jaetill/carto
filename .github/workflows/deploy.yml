@@ -1,4 +1,4 @@
-name: Deploy to S3 + CloudFront
+name: Deploy to S3 + CloudFront + Lambda
 
 on:
   push:
@@ -9,16 +9,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      # ── Frontend build ──────────────────────────────────
       - run: npm ci
       - run: npm run build
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
+
       - run: aws s3 sync dist/ s3://jaetill-carto --delete --exclude "engagements.json" --exclude "engagements/*"
       - run: aws cloudfront create-invalidation --distribution-id E36OPEPVLCLUYJ --paths "/*"
+
+      # ── Lambda deploy ───────────────────────────────────
+      - name: Install Lambda dependencies
+        run: npm ci
+        working-directory: lambda
+
+      - name: Package Lambda
+        run: zip -r ../lambda-deploy.zip .
+        working-directory: lambda
+
+      - name: Deploy Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name cartoApi \
+            --region us-east-2 \
+            --zip-file fileb://lambda-deploy.zip

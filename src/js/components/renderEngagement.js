@@ -3,6 +3,7 @@ import { detectFileType, parseNmap, parseMetasploit } from '../data/parsers.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
+import { triggerGraphSync } from '../data/graph.js';
 
 export async function renderEngagement(engagementId) {
   const container = document.getElementById('app-content');
@@ -18,6 +19,9 @@ export async function renderEngagement(engagementId) {
   // Subnet collapse state — null means "not yet initialized"
   let collapsedSubnets = null;
 
+  // Tab state
+  let activeTab = 'overview'; // 'overview' | 'topology' | 'pathing'
+
   render();
 
   function render() {
@@ -25,6 +29,7 @@ export async function renderEngagement(engagementId) {
 
     // ── Header ────────────────────────────────────────────
     const header = document.createElement('div');
+
     header.className = 'flex items-start justify-between mb-6';
 
     const titleBlock = document.createElement('div');
@@ -84,6 +89,75 @@ export async function renderEngagement(engagementId) {
       stats.appendChild(card);
     });
     container.appendChild(stats);
+
+    // ── Tab bar ───────────────────────────────────────────
+    const tabBar = document.createElement('div');
+    tabBar.className = 'flex items-center gap-1 mb-6 border-b border-slate-200';
+
+    const tabs = [
+      { id: 'overview', label: 'Overview' },
+      { id: 'topology', label: 'Topology' },
+      { id: 'pathing',  label: 'Attack Path' },
+    ];
+
+    tabs.forEach(({ id, label }) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        activeTab === id
+          ? 'border-indigo-600 text-indigo-700'
+          : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+      }`;
+      tab.textContent = label;
+      tab.onclick = () => {
+        activeTab = id;
+        render();
+      };
+      tabBar.appendChild(tab);
+    });
+
+    // Sync button — only on topology/pathing tabs
+    if (activeTab !== 'overview') {
+      const syncBtn = btn('↺ Sync Graph', 'ghost');
+      syncBtn.className += ' text-xs ml-auto';
+      syncBtn.onclick = async () => {
+        syncBtn.disabled = true;
+        syncBtn.textContent = 'Syncing…';
+        try {
+          await triggerGraphSync(engagementId);
+          toastSuccess('Graph synced.');
+          render();
+        } catch (e) {
+          toastError('Sync failed: ' + e.message);
+          syncBtn.disabled = false;
+          syncBtn.textContent = '↺ Sync Graph';
+        }
+      };
+      tabBar.appendChild(syncBtn);
+    }
+
+    container.appendChild(tabBar);
+
+    // ── Tab content ───────────────────────────────────────
+    if (activeTab === 'topology') {
+      const topologyContainer = document.createElement('div');
+      container.appendChild(topologyContainer);
+      import('./renderTopology.js').then(m =>
+        m.renderTopology(
+          engagementId,
+          topologyContainer,
+          (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render)),
+        )
+      );
+      return;
+    }
+
+    if (activeTab === 'pathing') {
+      const pathingContainer = document.createElement('div');
+      container.appendChild(pathingContainer);
+      import('./renderPathing.js').then(m => m.renderPathing(engagementId, pathingContainer));
+      return;
+    }
 
     // ── Two-column layout ─────────────────────────────────
     const cols = document.createElement('div');
