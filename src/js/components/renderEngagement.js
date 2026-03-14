@@ -1,14 +1,14 @@
-import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, newHost, newNote } from '../data/index.js';
+import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, newHost, newNote, saveEngagements } from '../data/index.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
-import { renderEngagements } from './renderEngagements.js';
+import { renderSidebar } from './renderEngagements.js';
 
 export async function renderEngagement(engagementId) {
   const container = document.getElementById('app-content');
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading…</p>';
 
-  const eng  = engagements.find(e => e.id === engagementId);
-  if (!eng) { renderEngagements(); return; }
+  const eng = engagements.find(e => e.id === engagementId);
+  if (!eng) { container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Engagement not found.</p>'; return; }
 
   let data      = await loadEngagementData(engagementId);
   let snapshots = await loadSnapshots(engagementId);
@@ -18,144 +18,158 @@ export async function renderEngagement(engagementId) {
   function render() {
     container.innerHTML = '';
 
-    // Header
+    // ── Header ────────────────────────────────────────────
     const header = document.createElement('div');
-    header.className = 'flex items-center gap-3 mb-4';
+    header.className = 'flex items-start justify-between mb-6';
 
-    const backBtn = btn('← Back', 'ghost');
-    backBtn.onclick = renderEngagements;
-
-    const titleEl = document.createElement('div');
-    titleEl.className = 'flex-1 min-w-0';
+    const titleBlock = document.createElement('div');
 
     const nameEl = document.createElement('h2');
-    nameEl.className = 'text-lg font-bold text-slate-800 truncate';
+    nameEl.className = 'text-2xl font-bold text-slate-800';
     nameEl.textContent = eng.name;
 
     const metaEl = document.createElement('p');
-    metaEl.className = 'text-xs text-slate-400';
+    metaEl.className = 'text-sm text-slate-400 mt-0.5';
     metaEl.textContent = [eng.client, eng.startDate].filter(Boolean).join(' · ');
 
-    titleEl.appendChild(nameEl);
-    titleEl.appendChild(metaEl);
+    titleBlock.appendChild(nameEl);
+    titleBlock.appendChild(metaEl);
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'flex items-center gap-2';
 
     const badge = document.createElement('span');
-    badge.className = `badge badge-${eng.status} shrink-0`;
+    badge.className = `badge badge-${eng.status}`;
     badge.textContent = eng.status;
 
-    header.appendChild(backBtn);
-    header.appendChild(titleEl);
-    header.appendChild(badge);
+    const editBtn = btn('Edit', 'secondary');
+    editBtn.className += ' text-xs';
+    editBtn.onclick = () => showEngagementForm();
+
+    headerActions.appendChild(badge);
+    headerActions.appendChild(editBtn);
+    header.appendChild(titleBlock);
+    header.appendChild(headerActions);
     container.appendChild(header);
 
-    // Hosts section
-    const hostsLabel = document.createElement('div');
-    hostsLabel.className = 'flex items-center justify-between mb-2';
+    // ── Stats row ─────────────────────────────────────────
+    const stats = document.createElement('div');
+    stats.className = 'grid grid-cols-4 gap-4 mb-6';
 
-    const hostsTitle = document.createElement('span');
-    hostsTitle.className = 'section-label mb-0';
+    const compromised = data.hosts.filter(h => h.status === 'compromised').length;
+    const snapCount   = snapshots.length;
+    const noteCount   = (data.notes || []).filter(n => !n.hostId).length;
+
+    [
+      { label: 'Hosts',       value: data.hosts.length },
+      { label: 'Compromised', value: compromised, accent: compromised > 0 ? 'text-red-600' : '' },
+      { label: 'Snapshots',   value: snapCount },
+      { label: 'Notes',       value: noteCount },
+    ].forEach(({ label, value, accent = '' }) => {
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-xl border border-slate-100 p-4';
+      const val = document.createElement('p');
+      val.className = `text-2xl font-bold text-slate-800 ${accent}`;
+      val.textContent = value;
+      const lbl = document.createElement('p');
+      lbl.className = 'text-xs text-slate-400 mt-0.5';
+      lbl.textContent = label;
+      card.appendChild(val);
+      card.appendChild(lbl);
+      stats.appendChild(card);
+    });
+    container.appendChild(stats);
+
+    // ── Two-column layout ─────────────────────────────────
+    const cols = document.createElement('div');
+    cols.className = 'grid grid-cols-3 gap-6';
+
+    // Left: host table (2/3 width)
+    const hostCol = document.createElement('div');
+    hostCol.className = 'col-span-2';
+
+    const hostsHeader = document.createElement('div');
+    hostsHeader.className = 'flex items-center justify-between mb-3';
+    const hostsTitle = document.createElement('h3');
+    hostsTitle.className = 'text-sm font-semibold text-slate-700';
     hostsTitle.textContent = 'Hosts';
-
-    const addHostBtn = btn('+ Add Host', 'ghost');
-    addHostBtn.className += ' text-xs text-indigo-600';
+    const addHostBtn = btn('+ Add Host', 'secondary');
+    addHostBtn.className += ' text-xs';
     addHostBtn.onclick = () => showHostForm(null);
-
-    hostsLabel.appendChild(hostsTitle);
-    hostsLabel.appendChild(addHostBtn);
-    container.appendChild(hostsLabel);
+    hostsHeader.appendChild(hostsTitle);
+    hostsHeader.appendChild(addHostBtn);
+    hostCol.appendChild(hostsHeader);
 
     if (data.hosts.length === 0) {
       const empty = document.createElement('p');
-      empty.className = 'text-slate-300 text-sm italic mb-4';
+      empty.className = 'text-slate-400 text-sm italic';
       empty.textContent = 'No hosts yet.';
-      container.appendChild(empty);
+      hostCol.appendChild(empty);
     } else {
+      const table = document.createElement('table');
+      table.className = 'w-full text-sm bg-white rounded-xl border border-slate-100 overflow-hidden';
+
+      const thead = document.createElement('thead');
+      thead.innerHTML = `<tr class="border-b border-slate-100">
+        <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">IP</th>
+        <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">Hostname</th>
+        <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">OS</th>
+        <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">Status</th>
+        <th class="text-right px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">Snaps</th>
+      </tr>`;
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
       data.hosts.forEach(host => {
-        const card = document.createElement('div');
-        card.className = 'card cursor-pointer hover:border-indigo-200 transition-colors mb-2';
-
-        const row = document.createElement('div');
-        row.className = 'flex items-center gap-3';
-
-        const ipEl = document.createElement('span');
-        ipEl.className = 'font-mono text-sm font-semibold text-slate-800 shrink-0';
-        ipEl.textContent = host.ip || '—';
-
-        const info = document.createElement('div');
-        info.className = 'flex-1 min-w-0';
-
-        const hostname = document.createElement('p');
-        hostname.className = 'text-sm text-slate-700 truncate';
-        hostname.textContent = host.hostname || '';
-
-        const osMeta = document.createElement('p');
-        osMeta.className = 'text-xs text-slate-400';
-        osMeta.textContent = host.os || host.osFamily || '';
-
-        info.appendChild(hostname);
-        info.appendChild(osMeta);
-
-        const statusBadge = document.createElement('span');
-        statusBadge.className = `badge badge-${host.status} shrink-0`;
-        statusBadge.textContent = host.status;
-
-        const hostSnapCount = snapshots.filter(s => s.hostId === host.id).length;
-        if (hostSnapCount > 0) {
-          const snapEl = document.createElement('span');
-          snapEl.className = 'text-xs text-slate-400 shrink-0';
-          snapEl.textContent = `${hostSnapCount} snap${hostSnapCount !== 1 ? 's' : ''}`;
-          row.appendChild(ipEl);
-          row.appendChild(info);
-          row.appendChild(snapEl);
-          row.appendChild(statusBadge);
-        } else {
-          row.appendChild(ipEl);
-          row.appendChild(info);
-          row.appendChild(statusBadge);
-        }
-
-        card.appendChild(row);
-        card.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render));
-
-        container.appendChild(card);
+        const snapCount = snapshots.filter(s => s.hostId === host.id).length;
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors';
+        tr.innerHTML = `
+          <td class="px-4 py-2.5 font-mono text-xs font-semibold text-slate-700">${host.ip || '—'}</td>
+          <td class="px-4 py-2.5 text-slate-600 truncate max-w-xs">${host.hostname || '—'}</td>
+          <td class="px-4 py-2.5 text-slate-500 text-xs">${host.os || host.osFamily || '—'}</td>
+          <td class="px-4 py-2.5"><span class="badge badge-${host.status}">${host.status}</span></td>
+          <td class="px-4 py-2.5 text-right text-xs text-slate-400">${snapCount || '—'}</td>
+        `;
+        tr.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render));
+        tbody.appendChild(tr);
       });
+      table.appendChild(tbody);
+      hostCol.appendChild(table);
     }
 
-    // Notes section
-    const notesLabel = document.createElement('div');
-    notesLabel.className = 'flex items-center justify-between mb-2 mt-4';
+    cols.appendChild(hostCol);
 
-    const notesTitle = document.createElement('span');
-    notesTitle.className = 'section-label mb-0';
+    // Right: notes (1/3 width)
+    const noteCol = document.createElement('div');
+
+    const notesHeader = document.createElement('div');
+    notesHeader.className = 'flex items-center justify-between mb-3';
+    const notesTitle = document.createElement('h3');
+    notesTitle.className = 'text-sm font-semibold text-slate-700';
     notesTitle.textContent = 'Notes';
-
-    const addNoteBtn = btn('+ Add Note', 'ghost');
-    addNoteBtn.className += ' text-xs text-indigo-600';
+    const addNoteBtn = btn('+ Add', 'secondary');
+    addNoteBtn.className += ' text-xs';
     addNoteBtn.onclick = () => showNoteForm();
-
-    notesLabel.appendChild(notesTitle);
-    notesLabel.appendChild(addNoteBtn);
-    container.appendChild(notesLabel);
+    notesHeader.appendChild(notesTitle);
+    notesHeader.appendChild(addNoteBtn);
+    noteCol.appendChild(notesHeader);
 
     const engNotes = (data.notes || []).filter(n => !n.hostId).sort((a, b) => b.timestamp - a.timestamp);
 
     if (engNotes.length === 0) {
       const empty = document.createElement('p');
-      empty.className = 'text-slate-300 text-sm italic';
+      empty.className = 'text-slate-400 text-sm italic';
       empty.textContent = 'No notes yet.';
-      container.appendChild(empty);
+      noteCol.appendChild(empty);
     } else {
       engNotes.forEach(note => {
         const card = document.createElement('div');
-        card.className = 'card mb-2';
+        card.className = 'bg-white rounded-xl border border-slate-100 p-3 mb-2';
 
         const ts = document.createElement('p');
         ts.className = 'text-xs text-slate-400 mb-1';
         ts.textContent = new Date(note.timestamp).toLocaleString();
-
-        const text = document.createElement('p');
-        text.className = 'text-sm text-slate-700 whitespace-pre-wrap';
-        text.textContent = note.text;
 
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
@@ -167,15 +181,107 @@ export async function renderEngagement(engagementId) {
           catch { toastError('Could not delete note.'); }
         };
 
+        const text = document.createElement('p');
+        text.className = 'text-sm text-slate-700 whitespace-pre-wrap';
+        text.textContent = note.text;
+
         card.appendChild(delBtn);
         card.appendChild(ts);
         card.appendChild(text);
-        container.appendChild(card);
+        noteCol.appendChild(card);
       });
     }
+
+    cols.appendChild(noteCol);
+    container.appendChild(cols);
   }
 
-  // ── Host form ───────────────────────────────────────────
+  // ── Engagement edit form ──────────────────────────────
+
+  function showEngagementForm() {
+    const copy = { ...eng };
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    const box = document.createElement('div');
+    box.className = 'modal-box';
+
+    const title = document.createElement('h3');
+    title.className = 'text-lg font-bold text-slate-800 mb-4';
+    title.textContent = 'Edit Engagement';
+    box.appendChild(title);
+
+    function field(labelText, key, placeholder = '') {
+      const wrap = document.createElement('div');
+      wrap.className = 'mb-3';
+      const label = document.createElement('label');
+      label.className = 'block text-sm font-medium text-slate-700 mb-1';
+      label.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'field';
+      input.placeholder = placeholder;
+      input.value = copy[key] || '';
+      input.oninput = e => { copy[key] = e.target.value; };
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      box.appendChild(wrap);
+      return input;
+    }
+
+    field('Name', 'name');
+    field('Client', 'client');
+    field('Start date', 'startDate', 'YYYY-MM-DD');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4';
+    const lbl = document.createElement('label');
+    lbl.className = 'block text-sm font-medium text-slate-700 mb-1';
+    lbl.textContent = 'Status';
+    const sel = document.createElement('select');
+    sel.className = 'field';
+    ['active', 'closed'].forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s;
+      opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+      opt.selected = copy.status === s;
+      sel.appendChild(opt);
+    });
+    sel.onchange = e => { copy.status = e.target.value; };
+    wrap.appendChild(lbl);
+    wrap.appendChild(sel);
+    box.appendChild(wrap);
+
+    const actions = document.createElement('div');
+    actions.className = 'flex gap-3 mt-4';
+    const saveBtn = btn('Save', 'primary');
+    saveBtn.className += ' flex-1';
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      try {
+        Object.assign(eng, copy);
+        const updated = engagements.map(e => e.id === eng.id ? eng : e);
+        await saveEngagements(updated);
+        toastSuccess('Saved.');
+        backdrop.remove();
+        renderSidebar();
+        render();
+      } catch (err) {
+        toastError(err.message || 'Could not save.');
+        saveBtn.disabled = false;
+      }
+    };
+    const cancelBtn = btn('Cancel', 'ghost');
+    cancelBtn.onclick = () => backdrop.remove();
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    box.appendChild(actions);
+
+    backdrop.appendChild(box);
+    backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
+    document.body.appendChild(backdrop);
+  }
+
+  // ── Host form ─────────────────────────────────────────
 
   function showHostForm(existing) {
     const isNew = !existing;
@@ -183,7 +289,6 @@ export async function renderEngagement(engagementId) {
 
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
-
     const box = document.createElement('div');
     box.className = 'modal-box';
 
@@ -214,7 +319,6 @@ export async function renderEngagement(engagementId) {
     fieldRow('Hostname', 'hostname', 'e.g. DC01.corp.local');
     fieldRow('OS', 'os', 'e.g. Windows Server 2019');
 
-    // Status
     const statusWrap = document.createElement('div');
     statusWrap.className = 'mb-4';
     const statusLabel = document.createElement('label');
@@ -236,7 +340,6 @@ export async function renderEngagement(engagementId) {
 
     const actions = document.createElement('div');
     actions.className = 'flex gap-3';
-
     const saveBtn = btn(isNew ? 'Add Host' : 'Save', 'primary');
     saveBtn.className += ' flex-1';
     saveBtn.onclick = async () => {
@@ -256,10 +359,8 @@ export async function renderEngagement(engagementId) {
         saveBtn.disabled = false;
       }
     };
-
     const cancelBtn = btn('Cancel', 'ghost');
     cancelBtn.onclick = () => backdrop.remove();
-
     if (!isNew) {
       const delBtn = btn('Delete', 'danger');
       delBtn.onclick = async () => {
@@ -274,23 +375,20 @@ export async function renderEngagement(engagementId) {
       };
       actions.appendChild(delBtn);
     }
-
     actions.appendChild(saveBtn);
     actions.appendChild(cancelBtn);
     box.appendChild(actions);
-
     backdrop.appendChild(box);
     backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
     document.body.appendChild(backdrop);
     ipInput.focus();
   }
 
-  // ── Note form ───────────────────────────────────────────
+  // ── Note form ─────────────────────────────────────────
 
   function showNoteForm() {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
-
     const box = document.createElement('div');
     box.className = 'modal-box';
 
@@ -307,7 +405,6 @@ export async function renderEngagement(engagementId) {
 
     const actions = document.createElement('div');
     actions.className = 'flex gap-3';
-
     const saveBtn = btn('Add Note', 'primary');
     saveBtn.className += ' flex-1';
     saveBtn.onclick = async () => {
@@ -325,14 +422,11 @@ export async function renderEngagement(engagementId) {
         saveBtn.disabled = false;
       }
     };
-
     const cancelBtn = btn('Cancel', 'ghost');
     cancelBtn.onclick = () => backdrop.remove();
-
     actions.appendChild(saveBtn);
     actions.appendChild(cancelBtn);
     box.appendChild(actions);
-
     backdrop.appendChild(box);
     backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
     document.body.appendChild(backdrop);

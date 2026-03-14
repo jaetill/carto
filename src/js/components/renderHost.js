@@ -8,36 +8,45 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
   const host = data.hosts.find(h => h.id === hostId);
   if (!host) { onBack(); return; }
 
+  let activeTab = 'snapshots';
+
   render();
 
   function render() {
     container.innerHTML = '';
 
-    // Header
+    // ── Header ────────────────────────────────────────────
     const header = document.createElement('div');
-    header.className = 'flex items-center gap-3 mb-4';
+    header.className = 'flex items-start gap-4 mb-6';
 
-    const backBtn = btn('← Back', 'ghost');
-    backBtn.onclick = onBack;
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'flex-1 min-w-0';
 
-    const titleEl = document.createElement('div');
-    titleEl.className = 'flex-1 min-w-0';
+    const breadcrumb = document.createElement('p');
+    breadcrumb.className = 'text-xs text-slate-400 mb-1 cursor-pointer hover:text-indigo-400';
+    breadcrumb.textContent = '← Back to engagement';
+    breadcrumb.onclick = onBack;
+    titleBlock.appendChild(breadcrumb);
 
     const ipEl = document.createElement('h2');
-    ipEl.className = 'text-lg font-bold font-mono text-slate-800';
+    ipEl.className = 'text-2xl font-bold font-mono text-slate-800';
     ipEl.textContent = host.ip;
+    titleBlock.appendChild(ipEl);
 
     const metaEl = document.createElement('p');
-    metaEl.className = 'text-xs text-slate-400';
-    metaEl.textContent = [host.hostname, host.os].filter(Boolean).join(' · ');
+    metaEl.className = 'text-sm text-slate-400 mt-0.5';
+    metaEl.textContent = [host.hostname, host.os].filter(Boolean).join(' · ') || 'No hostname or OS recorded';
+    titleBlock.appendChild(metaEl);
 
-    titleEl.appendChild(ipEl);
-    titleEl.appendChild(metaEl);
+    header.appendChild(titleBlock);
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'flex items-center gap-3 flex-shrink-0 mt-1';
 
     const statusBadge = document.createElement('span');
-    statusBadge.className = `badge badge-${host.status} shrink-0 cursor-pointer`;
+    statusBadge.className = `badge badge-${host.status} cursor-pointer select-none`;
     statusBadge.textContent = host.status;
-    statusBadge.title = 'Click to toggle status';
+    statusBadge.title = 'Click to cycle status';
     statusBadge.onclick = async () => {
       const next = { observed: 'compromised', compromised: 'unknown', unknown: 'observed' };
       host.status = next[host.status] || 'observed';
@@ -47,173 +56,238 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     };
 
     const addSnapBtn = btn('+ Snapshot', 'primary');
-    addSnapBtn.className += ' text-xs shrink-0';
     addSnapBtn.onclick = () => showSnapshotForm();
 
-    header.appendChild(backBtn);
-    header.appendChild(titleEl);
-    header.appendChild(statusBadge);
-    header.appendChild(addSnapBtn);
+    const addNoteBtn = btn('+ Note', 'ghost');
+    addNoteBtn.onclick = () => { activeTab = 'notes'; showNoteForm(); };
+
+    headerActions.appendChild(statusBadge);
+    headerActions.appendChild(addNoteBtn);
+    headerActions.appendChild(addSnapBtn);
+    header.appendChild(headerActions);
     container.appendChild(header);
 
-    // Host notes
-    const noteRow = document.createElement('div');
-    noteRow.className = 'flex items-center justify-between mb-2';
-    const notesLabel = document.createElement('span');
-    notesLabel.className = 'section-label mb-0';
-    notesLabel.textContent = 'Notes';
-    const addNoteBtn = btn('+ Note', 'ghost');
-    addNoteBtn.className += ' text-xs text-indigo-600';
-    addNoteBtn.onclick = () => showNoteForm();
-    noteRow.appendChild(notesLabel);
-    noteRow.appendChild(addNoteBtn);
-    container.appendChild(noteRow);
-
+    // ── Stats row ─────────────────────────────────────────
+    const hostSnaps = snapshots.filter(s => s.hostId === hostId).sort((a, b) => b.timestamp - a.timestamp);
     const hostNotes = (data.notes || []).filter(n => n.hostId === hostId).sort((a, b) => b.timestamp - a.timestamp);
-    if (hostNotes.length > 0) {
-      hostNotes.forEach(note => {
-        const card = document.createElement('div');
-        card.className = 'bg-slate-50 rounded-lg px-3 py-2 mb-2 text-sm text-slate-700';
 
-        const ts = document.createElement('span');
-        ts.className = 'text-xs text-slate-400 mr-2';
-        ts.textContent = new Date(note.timestamp).toLocaleString();
+    const statsRow = document.createElement('div');
+    statsRow.className = 'grid grid-cols-4 gap-4 mb-6';
 
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.textContent = '×';
-        delBtn.className = 'float-right text-slate-300 hover:text-red-400 text-lg leading-none ml-2';
-        delBtn.onclick = async () => {
-          data.notes = data.notes.filter(n => n.id !== note.id);
-          try { await saveEngagementData(engagementId, data); render(); }
-          catch { toastError('Could not delete note.'); }
-        };
+    const latestNetstat = hostSnaps.find(s => s.commandType === 'netstat');
+    const listeningCount = latestNetstat?.parsed?.connections?.filter(c => c.state === 'LISTENING' || c.state === 'LISTEN').length ?? '—';
+    const estCount = latestNetstat?.parsed?.connections?.filter(c => c.state === 'ESTABLISHED').length ?? '—';
 
-        card.appendChild(delBtn);
-        card.appendChild(ts);
-        card.appendChild(document.createTextNode(note.text));
-        container.appendChild(card);
-      });
-    }
+    [
+      { label: 'Snapshots', value: hostSnaps.length },
+      { label: 'Notes', value: hostNotes.length },
+      { label: 'Listening ports', value: listeningCount },
+      { label: 'Established conns', value: estCount },
+    ].forEach(({ label, value }) => {
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-xl border border-slate-200 px-4 py-3';
+      const v = document.createElement('p');
+      v.className = 'text-2xl font-bold text-slate-800';
+      v.textContent = value;
+      const l = document.createElement('p');
+      l.className = 'text-xs text-slate-400 mt-0.5';
+      l.textContent = label;
+      card.appendChild(v);
+      card.appendChild(l);
+      statsRow.appendChild(card);
+    });
+    container.appendChild(statsRow);
 
-    // Snapshots
-    const hostSnaps = snapshots
-      .filter(s => s.hostId === hostId)
-      .sort((a, b) => b.timestamp - a.timestamp);
+    // ── Tabs ──────────────────────────────────────────────
+    const tabBar = document.createElement('div');
+    tabBar.className = 'flex gap-1 border-b border-slate-200 mb-4';
 
-    if (hostSnaps.length > 0) {
-      const snapsLabel = document.createElement('span');
-      snapsLabel.className = 'section-label mt-4';
-      snapsLabel.textContent = 'Snapshots';
-      container.appendChild(snapsLabel);
+    ['snapshots', 'notes'].forEach(tab => {
+      const t = document.createElement('button');
+      t.type = 'button';
+      t.className = `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        activeTab === tab
+          ? 'border-indigo-600 text-indigo-600'
+          : 'border-transparent text-slate-500 hover:text-slate-700'
+      }`;
+      t.textContent = tab === 'snapshots'
+        ? `Snapshots (${hostSnaps.length})`
+        : `Notes (${hostNotes.length})`;
+      t.onclick = () => { activeTab = tab; render(); };
+      tabBar.appendChild(t);
+    });
+    container.appendChild(tabBar);
 
-      hostSnaps.forEach((snap, i) => {
-        const prevSnap = hostSnaps.find((s, j) => j > i && s.commandType === snap.commandType);
-        const diff = prevSnap ? diffSnapshots(prevSnap, snap) : null;
-        const hasChanges = diff && (diff.added?.length || diff.removed?.length);
-
-        const card = document.createElement('div');
-        card.className = 'card mb-2';
-
-        // Snap header
-        const snapHeader = document.createElement('div');
-        snapHeader.className = 'flex items-center gap-2 mb-2';
-
-        const cmdBadge = document.createElement('span');
-        cmdBadge.className = 'badge bg-indigo-100 text-indigo-700';
-        cmdBadge.textContent = snap.commandType;
-
-        const tsBadge = document.createElement('span');
-        tsBadge.className = 'text-xs text-slate-400 flex-1';
-        tsBadge.textContent = new Date(snap.timestamp).toLocaleString();
-
-        const osBadge = document.createElement('span');
-        osBadge.className = 'text-xs text-slate-400';
-        osBadge.textContent = snap.osFamily;
-
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.textContent = '×';
-        delBtn.className = 'text-slate-300 hover:text-red-400 text-lg leading-none';
-        delBtn.onclick = async () => {
-          const updated = snapshots.filter(s => s.id !== snap.id);
-          try { await saveSnapshots(engagementId, updated); snapshots = updated; render(); }
-          catch { toastError('Could not delete snapshot.'); }
-        };
-
-        snapHeader.appendChild(cmdBadge);
-        snapHeader.appendChild(tsBadge);
-        snapHeader.appendChild(osBadge);
-        snapHeader.appendChild(delBtn);
-        card.appendChild(snapHeader);
-
-        // Diff summary
-        if (hasChanges) {
-          const diffEl = document.createElement('div');
-          diffEl.className = 'mb-2 space-y-1';
-
-          if (diff.added?.length) {
-            const el = document.createElement('div');
-            el.className = 'diff-added rounded px-2 py-1 text-xs font-mono';
-            el.textContent = `+ ${diff.added.length} new: ${formatDiffItems(snap.commandType, diff.added)}`;
-            diffEl.appendChild(el);
-          }
-          if (diff.removed?.length) {
-            const el = document.createElement('div');
-            el.className = 'diff-removed rounded px-2 py-1 text-xs font-mono';
-            el.textContent = `− ${diff.removed.length} gone: ${formatDiffItems(snap.commandType, diff.removed)}`;
-            diffEl.appendChild(el);
-          }
-          card.appendChild(diffEl);
-        }
-
-        // Parsed summary
-        renderParsedSummary(card, snap);
-
-        // Raw toggle
-        const rawToggle = document.createElement('button');
-        rawToggle.type = 'button';
-        rawToggle.className = 'text-xs text-slate-400 hover:text-slate-600 mt-2';
-        rawToggle.textContent = 'Show raw output';
-        let rawVisible = false;
-        const rawEl = document.createElement('pre');
-        rawEl.className = 'field-mono bg-slate-50 rounded-lg p-3 mt-2 overflow-x-auto text-xs whitespace-pre hidden max-h-48 overflow-y-auto';
-        rawEl.textContent = snap.rawOutput;
-        rawToggle.onclick = () => {
-          rawVisible = !rawVisible;
-          rawEl.classList.toggle('hidden', !rawVisible);
-          rawToggle.textContent = rawVisible ? 'Hide raw output' : 'Show raw output';
-        };
-        card.appendChild(rawToggle);
-        card.appendChild(rawEl);
-
-        container.appendChild(card);
-      });
+    // ── Tab content ───────────────────────────────────────
+    if (activeTab === 'snapshots') {
+      renderSnapshotsTab(hostSnaps);
+    } else {
+      renderNotesTab(hostNotes);
     }
   }
 
-  // ── Snapshot form ───────────────────────────────────────
+  // ── Snapshots tab ──────────────────────────────────────
+
+  function renderSnapshotsTab(hostSnaps) {
+    if (hostSnaps.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'text-slate-400 text-sm text-center py-12';
+      empty.textContent = 'No snapshots yet. Click "+ Snapshot" to paste command output.';
+      container.appendChild(empty);
+      return;
+    }
+
+    hostSnaps.forEach((snap, i) => {
+      const prevSnap = hostSnaps.find((s, j) => j > i && s.commandType === snap.commandType);
+      const diff = prevSnap ? diffSnapshots(prevSnap, snap) : null;
+      const hasChanges = diff && (diff.added?.length || diff.removed?.length);
+
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-xl border border-slate-200 p-4 mb-3';
+
+      // Snap header
+      const snapHeader = document.createElement('div');
+      snapHeader.className = 'flex items-center gap-3 mb-3';
+
+      const cmdBadge = document.createElement('span');
+      cmdBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold bg-indigo-100 text-indigo-700';
+      cmdBadge.textContent = snap.commandType;
+
+      const osBadge = document.createElement('span');
+      osBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600';
+      osBadge.textContent = snap.osFamily;
+
+      const tsBadge = document.createElement('span');
+      tsBadge.className = 'text-xs text-slate-400 flex-1';
+      tsBadge.textContent = new Date(snap.timestamp).toLocaleString();
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = '×';
+      delBtn.className = 'text-slate-300 hover:text-red-400 text-xl leading-none ml-auto';
+      delBtn.onclick = async () => {
+        const updated = snapshots.filter(s => s.id !== snap.id);
+        try { await saveSnapshots(engagementId, updated); snapshots = updated; render(); }
+        catch { toastError('Could not delete snapshot.'); }
+      };
+
+      snapHeader.appendChild(cmdBadge);
+      snapHeader.appendChild(osBadge);
+      snapHeader.appendChild(tsBadge);
+      snapHeader.appendChild(delBtn);
+      card.appendChild(snapHeader);
+
+      // Diff summary
+      if (hasChanges) {
+        const diffEl = document.createElement('div');
+        diffEl.className = 'flex gap-2 mb-3 flex-wrap';
+
+        if (diff.added?.length) {
+          const el = document.createElement('div');
+          el.className = 'diff-added rounded px-2 py-1 text-xs font-mono';
+          el.textContent = `+${diff.added.length} new: ${formatDiffItems(snap.commandType, diff.added)}`;
+          diffEl.appendChild(el);
+        }
+        if (diff.removed?.length) {
+          const el = document.createElement('div');
+          el.className = 'diff-removed rounded px-2 py-1 text-xs font-mono';
+          el.textContent = `−${diff.removed.length} gone: ${formatDiffItems(snap.commandType, diff.removed)}`;
+          diffEl.appendChild(el);
+        }
+        card.appendChild(diffEl);
+      }
+
+      // Parsed body
+      renderParsedBody(card, snap);
+
+      // Raw toggle
+      const rawToggle = document.createElement('button');
+      rawToggle.type = 'button';
+      rawToggle.className = 'text-xs text-slate-400 hover:text-slate-600 mt-3 block';
+      rawToggle.textContent = 'Show raw output';
+      let rawVisible = false;
+      const rawEl = document.createElement('pre');
+      rawEl.className = 'bg-slate-50 rounded-lg p-3 mt-2 overflow-x-auto text-xs font-mono whitespace-pre hidden max-h-64 overflow-y-auto border border-slate-200';
+      rawEl.textContent = snap.rawOutput;
+      rawToggle.onclick = () => {
+        rawVisible = !rawVisible;
+        rawEl.classList.toggle('hidden', !rawVisible);
+        rawToggle.textContent = rawVisible ? 'Hide raw output' : 'Show raw output';
+      };
+      card.appendChild(rawToggle);
+      card.appendChild(rawEl);
+
+      container.appendChild(card);
+    });
+  }
+
+  // ── Notes tab ─────────────────────────────────────────
+
+  function renderNotesTab(hostNotes) {
+    if (hostNotes.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'text-slate-400 text-sm text-center py-12';
+      empty.textContent = 'No notes yet. Click "+ Note" to add one.';
+      container.appendChild(empty);
+      return;
+    }
+
+    hostNotes.forEach(note => {
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-xl border border-slate-200 px-4 py-3 mb-3';
+
+      const topRow = document.createElement('div');
+      topRow.className = 'flex items-center justify-between mb-2';
+
+      const ts = document.createElement('span');
+      ts.className = 'text-xs text-slate-400';
+      ts.textContent = new Date(note.timestamp).toLocaleString();
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.textContent = '×';
+      delBtn.className = 'text-slate-300 hover:text-red-400 text-xl leading-none';
+      delBtn.onclick = async () => {
+        data.notes = data.notes.filter(n => n.id !== note.id);
+        try { await saveEngagementData(engagementId, data); render(); }
+        catch { toastError('Could not delete note.'); }
+      };
+
+      topRow.appendChild(ts);
+      topRow.appendChild(delBtn);
+      card.appendChild(topRow);
+
+      const text = document.createElement('p');
+      text.className = 'text-sm text-slate-700 whitespace-pre-wrap';
+      text.textContent = note.text;
+      card.appendChild(text);
+
+      container.appendChild(card);
+    });
+  }
+
+  // ── Snapshot form ──────────────────────────────────────
 
   function showSnapshotForm() {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
 
     const box = document.createElement('div');
-    box.className = 'modal-box max-w-lg';
+    box.className = 'modal-box max-w-2xl';
 
     const title = document.createElement('h3');
-    title.className = 'text-lg font-bold text-slate-800 mb-3';
-    title.textContent = 'Paste Output';
+    title.className = 'text-lg font-bold text-slate-800 mb-1';
+    title.textContent = 'Paste Command Output';
     box.appendChild(title);
 
     const hint = document.createElement('p');
     hint.className = 'text-xs text-slate-400 mb-3';
-    hint.textContent = 'Paste the output of: netstat, ps / tasklist, ipconfig / ifconfig, uname, or arp. OS and command type will be detected automatically.';
+    hint.textContent = 'Supports: netstat, ps / tasklist, ipconfig / ifconfig, uname, arp. OS and command type detected automatically.';
     box.appendChild(hint);
 
     const textarea = document.createElement('textarea');
     textarea.className = 'field-mono mb-1 resize-none';
-    textarea.rows = 12;
+    textarea.rows = 16;
     textarea.placeholder = 'Paste raw output here…';
     box.appendChild(textarea);
 
@@ -256,7 +330,6 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
       const snap = newSnapshot({ hostId, commandType: cmdType, osFamily, rawOutput: raw, parsed });
 
-      // Auto-update host OS if detected and not yet set
       if (osFamily !== 'unknown' && (!host.osFamily || host.osFamily === 'unknown')) {
         host.osFamily = osFamily;
         data.hosts = data.hosts.map(h => h.id === hostId ? host : h);
@@ -291,7 +364,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     textarea.focus();
   }
 
-  // ── Note form ───────────────────────────────────────────
+  // ── Note form ─────────────────────────────────────────
 
   function showNoteForm() {
     const backdrop = document.createElement('div');
@@ -307,7 +380,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
     const textarea = document.createElement('textarea');
     textarea.className = 'field mb-4 resize-none';
-    textarea.rows = 4;
+    textarea.rows = 5;
     textarea.placeholder = 'What happened on this host…';
     box.appendChild(textarea);
 
@@ -344,9 +417,9 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
   }
 }
 
-// ── Rendering helpers ─────────────────────────────────────
+// ── Parsed body renderers ─────────────────────────────────
 
-function renderParsedSummary(card, snap) {
+function renderParsedBody(card, snap) {
   if (!snap.parsed) return;
 
   if (snap.commandType === 'netstat') {
@@ -354,62 +427,154 @@ function renderParsedSummary(card, snap) {
     const listening = conns.filter(c => c.state === 'LISTENING' || c.state === 'LISTEN');
     const established = conns.filter(c => c.state === 'ESTABLISHED');
 
-    const el = document.createElement('div');
-    el.className = 'text-xs text-slate-500 space-y-0.5';
     if (listening.length) {
-      const row = document.createElement('p');
-      row.textContent = `Listening (${listening.length}): ${listening.slice(0, 5).map(c => c.localAddr.split(':').pop()).join(', ')}${listening.length > 5 ? '…' : ''}`;
-      el.appendChild(row);
+      const section = document.createElement('div');
+      section.className = 'mb-3';
+      const label = document.createElement('p');
+      label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      label.textContent = `Listening (${listening.length})`;
+      section.appendChild(label);
+      const pills = document.createElement('div');
+      pills.className = 'flex flex-wrap gap-1.5';
+      listening.forEach(c => {
+        const pill = document.createElement('span');
+        pill.className = 'inline-block px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-xs font-mono';
+        pill.textContent = `${c.proto} :${c.localPort}`;
+        pills.appendChild(pill);
+      });
+      section.appendChild(pills);
+      card.appendChild(section);
     }
+
     if (established.length) {
-      const row = document.createElement('p');
-      row.textContent = `Established (${established.length}): ${established.slice(0, 3).map(c => c.remoteAddr).join(', ')}${established.length > 3 ? '…' : ''}`;
-      el.appendChild(row);
+      const section = document.createElement('div');
+      section.className = 'mb-1';
+      const label = document.createElement('p');
+      label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      label.textContent = `Established (${established.length})`;
+      section.appendChild(label);
+      const table = document.createElement('table');
+      table.className = 'w-full text-xs font-mono';
+      established.slice(0, 10).forEach(c => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        [c.proto, `${c.localAddr}:${c.localPort}`, `${c.remoteAddr}:${c.remotePort}`, c.state].forEach(val => {
+          const td = document.createElement('td');
+          td.className = 'py-0.5 pr-4 text-slate-600';
+          td.textContent = val ?? '';
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      if (established.length > 10) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'py-1 text-slate-400 text-xs';
+        td.textContent = `…and ${established.length - 10} more`;
+        tr.appendChild(td);
+        table.appendChild(tr);
+      }
+      section.appendChild(table);
+      card.appendChild(section);
     }
-    card.appendChild(el);
+    return;
   }
 
   if (snap.commandType === 'pslist') {
     const procs = snap.parsed.processes || [];
-    const el = document.createElement('p');
-    el.className = 'text-xs text-slate-500';
-    el.textContent = `${procs.length} processes`;
-    card.appendChild(el);
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Processes (${procs.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    procs.slice(0, 15).forEach(p => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      [p.pid, p.name, p.user ?? '', p.cmd ?? ''].forEach((val, i) => {
+        const td = document.createElement('td');
+        td.className = `py-0.5 pr-4 text-slate-600 ${i === 3 ? 'truncate max-w-xs' : ''}`;
+        td.textContent = val ?? '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    if (procs.length > 15) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${procs.length - 15} more`;
+      tr.appendChild(td);
+      table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
   }
 
   if (snap.commandType === 'ipconfig') {
     const ifaces = snap.parsed.interfaces || [];
-    const el = document.createElement('div');
-    el.className = 'text-xs text-slate-500 space-y-0.5';
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = 'Interfaces';
+    card.appendChild(label);
     ifaces.forEach(iface => {
       iface.addresses.forEach(addr => {
-        const row = document.createElement('p');
-        row.textContent = `${iface.name}: ${addr.ip}${addr.mask ? ' / ' + addr.mask : ''}`;
-        el.appendChild(row);
+        const row = document.createElement('div');
+        row.className = 'flex gap-4 text-xs font-mono py-0.5 border-t border-slate-100';
+        const n = document.createElement('span');
+        n.className = 'text-slate-500 w-40 flex-shrink-0 truncate';
+        n.textContent = iface.name;
+        const ip = document.createElement('span');
+        ip.className = 'text-slate-700';
+        ip.textContent = addr.ip + (addr.mask ? ' / ' + addr.mask : '');
+        const gw = document.createElement('span');
+        gw.className = 'text-slate-400';
+        gw.textContent = addr.gateway ? `gw ${addr.gateway}` : '';
+        row.appendChild(n);
+        row.appendChild(ip);
+        row.appendChild(gw);
+        card.appendChild(row);
       });
     });
-    card.appendChild(el);
+    return;
   }
 
   if (snap.commandType === 'uname') {
     const el = document.createElement('p');
-    el.className = 'text-xs text-slate-500 font-mono';
+    el.className = 'text-xs font-mono text-slate-600 bg-slate-50 rounded px-2 py-1.5';
     el.textContent = snap.parsed.raw || '';
     card.appendChild(el);
+    return;
   }
 
   if (snap.commandType === 'arp') {
     const entries = snap.parsed.entries || [];
-    const el = document.createElement('p');
-    el.className = 'text-xs text-slate-500';
-    el.textContent = `${entries.length} ARP ${entries.length === 1 ? 'entry' : 'entries'}`;
-    card.appendChild(el);
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `ARP entries (${entries.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    entries.forEach(e => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      [e.ip, e.mac, e.type ?? '', e.iface ?? ''].forEach(val => {
+        const td = document.createElement('td');
+        td.className = 'py-0.5 pr-4 text-slate-600';
+        td.textContent = val ?? '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    card.appendChild(table);
+    return;
   }
 }
 
-
 function formatDiffItems(type, items) {
-  if (type === 'netstat')  return items.slice(0, 3).map(c => `${c.proto} ${c.localAddr}→${c.remoteAddr}`).join(', ');
+  if (type === 'netstat')  return items.slice(0, 3).map(c => `${c.proto} :${c.localPort}`).join(', ');
   if (type === 'pslist')   return items.slice(0, 5).map(p => p.name).join(', ');
   if (type === 'arp')      return items.slice(0, 3).map(e => `${e.ip} (${e.mac})`).join(', ');
   if (type === 'ipconfig') return items.slice(0, 3).join(', ');
