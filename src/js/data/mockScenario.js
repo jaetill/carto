@@ -61,6 +61,52 @@ function snap(id, hostId, commandType, osFamily, rawOutput, daysAgoVal, hoursOff
 
 export const MOCK_ENG_ID = ENG_ID;
 
+// ── Mock attack path edges ─────────────────────────────────
+// Mirrors the attack chain told in engagement notes 1–6.
+
+export const mockAttackPaths = [
+  {
+    edgeId:    'mock-path-01',
+    fromHostId: H.JSMITH,
+    toHostId:   H.FS01,
+    technique:  'NTLM relay',
+    notes:      'Stolen NTLM hash from phishing victim. Relayed to FS01 — confirmed write access to Finance share.',
+    timestamp:  daysAgo(27),
+  },
+  {
+    edgeId:    'mock-path-02',
+    fromHostId: H.FS01,
+    toHostId:   H.DC01,
+    technique:  'Kerberoast → DCSync',
+    notes:      'SVC_BACKUP hash cracked offline (weak password). Used to escalate to Domain Admin. DCSync dumped all hashes.',
+    timestamp:  daysAgo(21),
+  },
+  {
+    edgeId:    'mock-path-03',
+    fromHostId: H.DC01,
+    toHostId:   H.JENKINS,
+    technique:  'Pass-the-hash (DA)',
+    notes:      'Pivoted to Jenkins using DA credentials. Found plaintext AWS keys in build pipeline env vars.',
+    timestamp:  daysAgo(18),
+  },
+  {
+    edgeId:    'mock-path-04',
+    fromHostId: H.JENKINS,
+    toHostId:   H.WEB01,
+    technique:  'Pipeline abuse (CVE-2024-23897)',
+    notes:      'Deployed reverse shell via Jenkins deployment job. WEB01 compromised.',
+    timestamp:  daysAgo(14),
+  },
+  {
+    edgeId:    'mock-path-05',
+    fromHostId: H.DC01,
+    toHostId:   H.FS01,
+    technique:  'Golden ticket',
+    notes:      'Persistence via golden ticket after krbtgt hash dump. Re-access FS01 without credentials.',
+    timestamp:  daysAgo(5),
+  },
+];
+
 export const mockEngagements = [
   { id: ENG_ID, name: 'CORP Internal Pentest', client: 'Acme Corporation', status: 'active', startDate: START_DATE, notes: '', createdAt: START_TS },
 ];

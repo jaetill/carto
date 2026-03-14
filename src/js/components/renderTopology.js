@@ -1,6 +1,5 @@
 import cytoscape from 'cytoscape';
 import { loadTopology } from '../data/graph.js';
-import { isMockMode } from '../data/index.js';
 
 // ── Status colors ─────────────────────────────────────────
 
@@ -182,11 +181,6 @@ function removeTooltip(container) {
 
 export async function renderTopology(engagementId, container, onHostClick) {
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading topology…</p>';
-
-  if (isMockMode()) {
-    container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12 italic">Topology not available in debug mode.</p>';
-    return;
-  }
 
   let topology;
   try {

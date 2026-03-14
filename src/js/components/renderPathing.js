@@ -1,6 +1,5 @@
 import cytoscape from 'cytoscape';
 import { loadTopology, loadAttackPaths, saveAttackPath, deleteAttackPath } from '../data/graph.js';
-import { isMockMode } from '../data/index.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 
@@ -181,11 +180,6 @@ function showAddPathModal(engagementId, hosts, onSave) {
 
 export async function renderPathing(engagementId, container) {
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading attack paths…</p>';
-
-  if (isMockMode()) {
-    container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12 italic">Attack pathing not available in debug mode.</p>';
-    return;
-  }
 
   let topology, paths;
   try {
