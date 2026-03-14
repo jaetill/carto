@@ -109,8 +109,8 @@ export async function renderEngagement(engagementId) {
       empty.textContent = 'No hosts yet.';
       hostCol.appendChild(empty);
     } else {
-      // Group by /24 subnet
-      const grouped = groupBySubnet(data.hosts);
+      // Group by /24 subnet (dual-NIC hosts appear in each subnet they touch)
+      const grouped = groupBySubnet(data.hosts, snapshots);
       const subnetKeys = [...grouped.keys()];
 
       // First render: auto-collapse all subnets if there are multiple
@@ -137,8 +137,8 @@ export async function renderEngagement(engagementId) {
       subnetKeys.forEach(subnet => {
         const hosts = grouped.get(subnet);
         const isCollapsed = collapsedSubnets.has(subnet);
-        const compromisedCount = hosts.filter(h => h.status === 'compromised').length;
-        const snapTotal = hosts.reduce((n, h) => n + snapshots.filter(s => s.hostId === h.id).length, 0);
+        const compromisedCount = hosts.filter(({ host }) => host.status === 'compromised').length;
+        const snapTotal = hosts.reduce((n, { host }) => n + snapshots.filter(s => s.hostId === host.id).length, 0);
 
         // Subnet header row
         if (subnetKeys.length > 1) {
@@ -162,13 +162,17 @@ export async function renderEngagement(engagementId) {
 
         // Host rows
         if (!isCollapsed) {
-          hosts.forEach(host => {
+          hosts.forEach(({ host, displayIp }) => {
             const snapCount = snapshots.filter(s => s.hostId === host.id).length;
+            const isAlt = displayIp !== host.ip;
+            const ipCell = isAlt
+              ? `<span class="font-mono text-xs font-semibold text-slate-700">${displayIp}</span><span class="ml-1 text-slate-400 text-xs font-mono">(${host.ip})</span>`
+              : `<span class="font-mono text-xs font-semibold text-slate-700">${displayIp || '—'}</span>`;
             const tr = document.createElement('tr');
             tr.className = 'border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors';
             tr.innerHTML = `
               <td class="px-3 py-2.5"></td>
-              <td class="px-4 py-2.5 font-mono text-xs font-semibold text-slate-700">${host.ip || '—'}</td>
+              <td class="px-4 py-2.5">${ipCell}</td>
               <td class="px-4 py-2.5 text-slate-600 truncate max-w-xs">${host.hostname || '—'}</td>
               <td class="px-4 py-2.5 text-slate-500 text-xs">${host.os || host.osFamily || '—'}</td>
               <td class="px-4 py-2.5"><span class="badge badge-${host.status}">${host.status}</span></td>
@@ -483,17 +487,52 @@ export async function renderEngagement(engagementId) {
 
 // ── Helpers ───────────────────────────────────────────────
 
-function groupBySubnet(hosts) {
-  // Groups IPv4 hosts by /24 (first 3 octets). Non-IPv4 hosts go in "Other".
+function groupBySubnet(hosts, snapshots) {
+  // Returns Map<subnet, Array<{ host, displayIp }>>
+  // Dual-NIC hosts appear once per /24 they have an IP in (from primary IP + ipconfig snapshots).
   const map = new Map();
-  const sorted = [...hosts].sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
-  for (const host of sorted) {
-    const parts = (host.ip || '').split('.');
-    const key = parts.length === 4 ? parts.slice(0, 3).join('.') : 'Other';
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(host);
+
+  for (const host of hosts) {
+    // Collect all IPv4 addresses for this host
+    const allIps = new Set();
+    if (host.ip) allIps.add(host.ip);
+
+    const ipcfgSnaps = snapshots.filter(s => s.hostId === host.id && s.commandType === 'ipconfig' && s.parsed);
+    for (const snap of ipcfgSnaps) {
+      for (const iface of snap.parsed.interfaces || []) {
+        for (const addr of iface.addresses || []) {
+          if (addr.ip && addr.family !== 'IPv6' && !addr.ip.startsWith('127.') && !addr.ip.startsWith('169.254.')) {
+            allIps.add(addr.ip);
+          }
+        }
+      }
+    }
+
+    // Place host in each /24 it appears in
+    const seenSubnets = new Set();
+    for (const ip of allIps) {
+      const parts = ip.split('.');
+      const key = parts.length === 4 ? parts.slice(0, 3).join('.') : 'Other';
+      if (seenSubnets.has(key)) continue;
+      seenSubnets.add(key);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push({ host, displayIp: ip });
+    }
+
+    if (seenSubnets.size === 0) {
+      // No valid IP at all — put in Other
+      if (!map.has('Other')) map.set('Other', []);
+      map.get('Other').push({ host, displayIp: host.ip || '—' });
+    }
   }
-  return map;
+
+  // Sort map by subnet key numerically, then sort each group by IP
+  const sorted = new Map(
+    [...map.entries()]
+      .sort(([a], [b]) => ipToNum(a + '.0') - ipToNum(b + '.0'))
+      .map(([k, v]) => [k, v.sort((a, b) => ipToNum(a.displayIp) - ipToNum(b.displayIp))])
+  );
+  return sorted;
 }
 
 function ipToNum(ip) {
