@@ -231,7 +231,12 @@ export async function renderHostGraph(engagementId, host, container, hostSnaps, 
   container.innerHTML = '';
   const wrap = document.createElement('div');
   wrap.className = 'flex gap-4';
-  wrap.style.height = '520px';
+  // Fill remaining viewport height below the wrap's top edge
+  container.appendChild(wrap);
+  requestAnimationFrame(() => {
+    const top = wrap.getBoundingClientRect().top;
+    wrap.style.height = `calc(100vh - ${top + 16}px)`;
+  });
 
   const graphDiv = document.createElement('div');
   graphDiv.className = 'flex-1 rounded-xl border border-slate-200 bg-white overflow-hidden relative';
@@ -248,7 +253,6 @@ export async function renderHostGraph(engagementId, host, container, hostSnaps, 
 
   wrap.appendChild(graphDiv);
   wrap.appendChild(rightPanel);
-  container.appendChild(wrap);
 
   // ── Cytoscape init ────────────────────────────────────────
 
