@@ -1,7 +1,11 @@
 import { saveEngagementData, saveSnapshots, newSnapshot, newNote } from '../data/index.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
-import { detectOS, detectCommand, parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp, diffSnapshots } from '../data/parsers.js';
+import { detectOS, detectCommand,
+         parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
+         parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
+         parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
+         diffSnapshots } from '../data/parsers.js';
 
 export function renderHost(engagementId, hostId, data, snapshots, onBack) {
   const container = document.getElementById('app-content');
@@ -282,7 +286,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
     const hint = document.createElement('p');
     hint.className = 'text-xs text-slate-400 mb-3';
-    hint.textContent = 'Supports: netstat, ps / tasklist, ipconfig / ifconfig, uname, arp. OS and command type detected automatically.';
+    hint.textContent = 'Supports: netstat, ps/tasklist, ipconfig/ifconfig, uname, arp, net user, net localgroup administrators, qwinsta, /etc/passwd, /etc/shadow, last, whoami /all, sudo -l, net accounts, net share. OS and command type detected automatically.';
     box.appendChild(hint);
 
     const textarea = document.createElement('textarea');
@@ -321,11 +325,21 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
       let parsed = null;
       try {
-        if (cmdType === 'netstat')  parsed = parseNetstat(raw, osFamily);
-        if (cmdType === 'pslist')   parsed = parsePslist(raw, osFamily);
-        if (cmdType === 'ipconfig') parsed = parseIpconfig(raw, osFamily);
-        if (cmdType === 'uname')    parsed = parseUname(raw);
-        if (cmdType === 'arp')      parsed = parseArp(raw);
+        if (cmdType === 'netstat')     parsed = parseNetstat(raw, osFamily);
+        if (cmdType === 'pslist')      parsed = parsePslist(raw, osFamily);
+        if (cmdType === 'ipconfig')    parsed = parseIpconfig(raw, osFamily);
+        if (cmdType === 'uname')       parsed = parseUname(raw);
+        if (cmdType === 'arp')         parsed = parseArp(raw);
+        if (cmdType === 'netuser')     parsed = parseNetUser(raw);
+        if (cmdType === 'localadmins') parsed = parseLocalAdmins(raw);
+        if (cmdType === 'sessions')    parsed = parseQwinsta(raw);
+        if (cmdType === 'passwd')      parsed = parsePasswd(raw);
+        if (cmdType === 'shadow')      parsed = parseShadow(raw);
+        if (cmdType === 'lastlog')     parsed = parseLast(raw);
+        if (cmdType === 'whoami')      parsed = parseWhoamiAll(raw);
+        if (cmdType === 'sudol')       parsed = parseSudoL(raw);
+        if (cmdType === 'netaccounts') parsed = parseNetAccounts(raw);
+        if (cmdType === 'netshare')    parsed = parseNetShare(raw);
       } catch (e) { console.warn('Parse error:', e); }
 
       const snap = newSnapshot({ hostId, commandType: cmdType, osFamily, rawOutput: raw, parsed });
@@ -571,12 +585,363 @@ function renderParsedBody(card, snap) {
     card.appendChild(table);
     return;
   }
+
+  if (snap.commandType === 'netuser') {
+    const p = snap.parsed;
+    if (p.type === 'list') {
+      const label = document.createElement('p');
+      label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      label.textContent = `Local accounts (${p.users.length})`;
+      card.appendChild(label);
+      const pills = document.createElement('div');
+      pills.className = 'flex flex-wrap gap-1.5';
+      p.users.forEach(u => {
+        const pill = document.createElement('span');
+        pill.className = 'inline-block px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-mono';
+        pill.textContent = u.username;
+        pills.appendChild(pill);
+      });
+      card.appendChild(pills);
+    } else {
+      // detail view
+      const rows = [
+        ['Username',         p.username],
+        ['Full name',        p.fullName],
+        ['Account active',   p.accountActive ? 'Yes' : 'No'],
+        ['Last logon',       p.lastLogon],
+        ['Password last set',p.passwordLastSet],
+        ['Password expires', p.passwordExpires],
+      ].filter(([, v]) => v != null);
+      const table = document.createElement('table');
+      table.className = 'w-full text-xs mb-2';
+      rows.forEach(([k, v]) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        const kTd = document.createElement('td');
+        kTd.className = 'py-0.5 pr-4 text-slate-500 w-40';
+        kTd.textContent = k;
+        const vTd = document.createElement('td');
+        vTd.className = 'py-0.5 text-slate-700 font-mono';
+        vTd.textContent = String(v);
+        tr.appendChild(kTd); tr.appendChild(vTd);
+        table.appendChild(tr);
+      });
+      card.appendChild(table);
+      if (p.localGroups.length || p.globalGroups.length) {
+        const gl = document.createElement('p');
+        gl.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 mt-2';
+        gl.textContent = 'Group memberships';
+        card.appendChild(gl);
+        const pills = document.createElement('div');
+        pills.className = 'flex flex-wrap gap-1.5';
+        [...p.localGroups, ...p.globalGroups].forEach(g => {
+          const pill = document.createElement('span');
+          pill.className = 'inline-block px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-xs font-mono';
+          pill.textContent = g;
+          pills.appendChild(pill);
+        });
+        card.appendChild(pills);
+      }
+    }
+    return;
+  }
+
+  if (snap.commandType === 'localadmins') {
+    const { groupName, members } = snap.parsed;
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `${groupName} members (${members.length})`;
+    card.appendChild(label);
+    const pills = document.createElement('div');
+    pills.className = 'flex flex-wrap gap-1.5';
+    members.forEach(m => {
+      const pill = document.createElement('span');
+      pill.className = `inline-block px-2 py-0.5 rounded text-xs font-mono ${
+        m.isDomain ? 'bg-amber-50 text-amber-800' : 'bg-slate-100 text-slate-700'
+      }`;
+      pill.textContent = m.name;
+      pills.appendChild(pill);
+    });
+    card.appendChild(pills);
+    return;
+  }
+
+  if (snap.commandType === 'sessions') {
+    const sessions = snap.parsed.sessions || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Sessions (${sessions.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    sessions.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      [s.sessionName ?? '—', s.username ?? '—', s.id, s.state].forEach(val => {
+        const td = document.createElement('td');
+        td.className = 'py-0.5 pr-4 text-slate-600';
+        td.textContent = val ?? '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'passwd') {
+    const users = snap.parsed.users || [];
+    const loginUsers    = users.filter(u => u.isLoginShell && !u.isServiceAccount);
+    const serviceUsers  = users.filter(u => u.isServiceAccount);
+    if (loginUsers.length) {
+      const label = document.createElement('p');
+      label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      label.textContent = `Login-capable accounts (${loginUsers.length})`;
+      card.appendChild(label);
+      const table = document.createElement('table');
+      table.className = 'w-full text-xs font-mono mb-2';
+      loginUsers.forEach(u => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        [u.username, `uid:${u.uid}`, u.home ?? '', u.shell ?? ''].forEach(val => {
+          const td = document.createElement('td');
+          td.className = 'py-0.5 pr-4 text-slate-600';
+          td.textContent = val;
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      card.appendChild(table);
+    }
+    const svcLabel = document.createElement('p');
+    svcLabel.className = 'text-xs text-slate-400 mt-1';
+    svcLabel.textContent = `${serviceUsers.length} service account${serviceUsers.length !== 1 ? 's' : ''} (uid < 1000)`;
+    card.appendChild(svcLabel);
+    return;
+  }
+
+  if (snap.commandType === 'shadow') {
+    const entries = snap.parsed.entries || [];
+    const crackable = entries.filter(e => e.hasHash);
+    const locked    = entries.filter(e => e.locked);
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Shadow entries (${entries.length})`;
+    card.appendChild(label);
+    if (crackable.length) {
+      const warn = document.createElement('p');
+      warn.className = 'text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2 font-mono';
+      warn.textContent = `${crackable.length} crackable hash${crackable.length !== 1 ? 'es' : ''}: ${crackable.map(e => `${e.username} (${e.hashAlgo})`).join(', ')}`;
+      card.appendChild(warn);
+    }
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    entries.forEach(e => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const status = e.locked ? 'locked' : e.hasHash ? `hash:${e.hashAlgo}` : 'no hash';
+      [e.username, status].forEach((val, i) => {
+        const td = document.createElement('td');
+        td.className = `py-0.5 pr-4 ${i === 1 ? (e.hasHash ? 'text-amber-700' : 'text-slate-400') : 'text-slate-600'}`;
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'lastlog') {
+    const entries = snap.parsed.entries || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Login history (${entries.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    entries.slice(0, 15).forEach(e => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      [
+        e.username,
+        e.terminal,
+        e.fromIp ?? 'local',
+        e.loginTime,
+        e.stillLoggedIn ? 'still in' : (e.duration ?? ''),
+      ].forEach(val => {
+        const td = document.createElement('td');
+        td.className = 'py-0.5 pr-3 text-slate-600';
+        td.textContent = val ?? '';
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    if (entries.length > 15) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${entries.length - 15} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'whoami') {
+    const p = snap.parsed;
+    // user / admin badge
+    const userRow = document.createElement('div');
+    userRow.className = 'flex items-center gap-2 mb-2';
+    const userPill = document.createElement('span');
+    userPill.className = 'text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded';
+    userPill.textContent = p.username ?? '(unknown)';
+    userRow.appendChild(userPill);
+    if (p.isAdmin) {
+      const adminBadge = document.createElement('span');
+      adminBadge.className = 'text-xs font-semibold bg-red-100 text-red-700 px-2 py-0.5 rounded';
+      adminBadge.textContent = 'ADMIN';
+      userRow.appendChild(adminBadge);
+    }
+    card.appendChild(userRow);
+    if (p.dangerousPrivileges.length) {
+      const dp = document.createElement('div');
+      dp.className = 'mb-2';
+      const dpLabel = document.createElement('p');
+      dpLabel.className = 'text-xs font-semibold text-red-600 mb-1';
+      dpLabel.textContent = 'Dangerous privileges (enabled):';
+      dp.appendChild(dpLabel);
+      const pills = document.createElement('div');
+      pills.className = 'flex flex-wrap gap-1';
+      p.dangerousPrivileges.forEach(priv => {
+        const pill = document.createElement('span');
+        pill.className = 'text-xs font-mono bg-red-50 text-red-700 px-2 py-0.5 rounded';
+        pill.textContent = priv;
+        pills.appendChild(pill);
+      });
+      dp.appendChild(pills);
+      card.appendChild(dp);
+    }
+    if (p.groups.length) {
+      const gLabel = document.createElement('p');
+      gLabel.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      gLabel.textContent = `Groups (${p.groups.length})`;
+      card.appendChild(gLabel);
+      const pills = document.createElement('div');
+      pills.className = 'flex flex-wrap gap-1';
+      p.groups.slice(0, 10).forEach(g => {
+        const pill = document.createElement('span');
+        pill.className = 'text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded';
+        pill.textContent = g.name;
+        pills.appendChild(pill);
+      });
+      if (p.groups.length > 10) {
+        const more = document.createElement('span');
+        more.className = 'text-xs text-slate-400 px-2 py-0.5';
+        more.textContent = `+${p.groups.length - 10} more`;
+        pills.appendChild(more);
+      }
+      card.appendChild(pills);
+    }
+    return;
+  }
+
+  if (snap.commandType === 'sudol') {
+    const p = snap.parsed;
+    if (!p.canRunSudo) {
+      const el = document.createElement('p');
+      el.className = 'text-xs text-slate-400 italic';
+      el.textContent = 'User may not run sudo.';
+      card.appendChild(el);
+      return;
+    }
+    if (p.canRunAll) {
+      const warn = document.createElement('p');
+      warn.className = 'text-xs font-semibold text-red-600 bg-red-50 rounded px-2 py-1 mb-2';
+      warn.textContent = `${p.username ?? 'User'} can run ALL commands as ALL users (effectively root).`;
+      card.appendChild(warn);
+    }
+    p.entries.forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'text-xs font-mono border-t border-slate-100 py-0.5 text-slate-600';
+      const runAs = document.createElement('span');
+      runAs.className = 'text-slate-400 mr-2';
+      runAs.textContent = `(${e.runAs})${e.nopasswd ? ' NOPASSWD:' : ''}`;
+      row.appendChild(runAs);
+      row.appendChild(document.createTextNode(e.commands.join(', ')));
+      card.appendChild(row);
+    });
+    return;
+  }
+
+  if (snap.commandType === 'netaccounts') {
+    const p = snap.parsed;
+    const rows = [
+      ['Min password age',    p.minPasswordAge],
+      ['Max password age',    p.maxPasswordAge],
+      ['Min password length', p.minPasswordLength],
+      ['Password history',    p.passwordHistory],
+      ['Lockout threshold',   p.lockoutThreshold],
+      ['Lockout duration',    p.lockoutDuration],
+      ['Lockout window',      p.lockoutWindow],
+      ['Computer role',       p.computerRole],
+    ].filter(([, v]) => v != null);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs';
+    rows.forEach(([k, v]) => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const kTd = document.createElement('td');
+      kTd.className = 'py-0.5 pr-4 text-slate-500 w-48';
+      kTd.textContent = k;
+      const vTd = document.createElement('td');
+      vTd.className = 'py-0.5 text-slate-700 font-mono';
+      vTd.textContent = String(v);
+      tr.appendChild(kTd); tr.appendChild(vTd);
+      table.appendChild(tr);
+    });
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'netshare') {
+    const shares = snap.parsed.shares || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Shares (${shares.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs font-mono';
+    shares.forEach(s => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const nameTd = document.createElement('td');
+      nameTd.className = `py-0.5 pr-4 font-semibold ${s.isAdmin ? 'text-slate-400' : 'text-indigo-700'}`;
+      nameTd.textContent = s.name;
+      const pathTd = document.createElement('td');
+      pathTd.className = 'py-0.5 pr-4 text-slate-600';
+      pathTd.textContent = s.path ?? '—';
+      const remarkTd = document.createElement('td');
+      remarkTd.className = 'py-0.5 text-slate-400';
+      remarkTd.textContent = s.remark ?? '';
+      tr.appendChild(nameTd); tr.appendChild(pathTd); tr.appendChild(remarkTd);
+      table.appendChild(tr);
+    });
+    card.appendChild(table);
+    return;
+  }
 }
 
 function formatDiffItems(type, items) {
-  if (type === 'netstat')  return items.slice(0, 3).map(c => `${c.proto} :${c.localPort}`).join(', ');
-  if (type === 'pslist')   return items.slice(0, 5).map(p => p.name).join(', ');
-  if (type === 'arp')      return items.slice(0, 3).map(e => `${e.ip} (${e.mac})`).join(', ');
-  if (type === 'ipconfig') return items.slice(0, 3).join(', ');
+  if (type === 'netstat')     return items.slice(0, 3).map(c => `${c.proto} :${c.localPort}`).join(', ');
+  if (type === 'pslist')      return items.slice(0, 5).map(p => p.name).join(', ');
+  if (type === 'arp')         return items.slice(0, 3).map(e => `${e.ip} (${e.mac})`).join(', ');
+  if (type === 'ipconfig')    return items.slice(0, 3).join(', ');
+  if (type === 'localadmins') return items.slice(0, 3).map(m => m.name).join(', ');
+  if (type === 'sessions')    return items.slice(0, 3).map(s => s.username ?? s.sessionName ?? s.id).join(', ');
+  if (type === 'passwd')      return items.slice(0, 3).map(u => u.username).join(', ');
+  if (type === 'shadow')      return items.slice(0, 3).map(e => e.username).join(', ');
+  if (type === 'lastlog')     return items.slice(0, 3).map(e => e.username).join(', ');
+  if (type === 'netshare')    return items.slice(0, 3).map(s => s.name).join(', ');
   return '';
 }

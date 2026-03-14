@@ -15,6 +15,19 @@ export function detectOS(raw) {
   if (text.includes('gnu/linux') || text.includes('ubuntu') || text.includes('debian') ||
       text.includes('centos') || text.includes('rhel') || text.includes('fedora') ||
       text.includes('kali')) return 'linux';
+  // Windows — new command types
+  if (/user accounts for \\\\/i.test(raw)) return 'windows';
+  if (/alias name\s+administrators/i.test(raw)) return 'windows';
+  if (/sessionname\s+username\s+id\s+state/i.test(raw)) return 'windows';
+  if (/minimum password age/i.test(raw)) return 'windows';
+  if (/share name\s+resource/i.test(raw)) return 'windows';
+  if (/S-1-5-\d+-\d+/i.test(raw)) return 'windows';
+  if (/user name\s+\S/im.test(raw) && /account active/im.test(raw)) return 'windows';
+  // Linux — new command types
+  if (/^[a-z_][a-z0-9_-]*:[x*!]:\d+:\d+:/m.test(raw)) return 'linux';
+  if (/^[a-z_][a-z0-9_-]*:\$[0-9ay]/m.test(raw)) return 'linux';
+  if (/may run the following commands on/i.test(raw)) return 'linux';
+  if (/matching defaults entries for/i.test(raw)) return 'linux';
   return 'unknown';
 }
 
@@ -38,6 +51,32 @@ export function detectCommand(raw) {
   if (/internet address.*physical address/i.test(raw)) return 'arp'; // windows
   if (/\(\d+\.\d+\.\d+\.\d+\)\s+at\s+[0-9a-f:]+/i.test(raw)) return 'arp'; // linux
   if (/address\s+hwtype\s+hwaddress/i.test(raw)) return 'arp';
+  // net user
+  if (/user accounts for \\\\/i.test(raw)) return 'netuser';
+  if (/^user name\s+\S/im.test(raw) && /^account active/im.test(raw)) return 'netuser';
+  // net localgroup administrators
+  if (/^alias name\s+/im.test(raw) && /^members$/im.test(raw)) return 'localadmins';
+  // qwinsta / query session
+  if (/sessionname\s+username\s+id\s+state/i.test(raw)) return 'sessions';
+  // /etc/passwd
+  if (/^[a-z_][a-z0-9_-]*:[x*!]:\d+:\d+:/m.test(raw) && raw.split('\n').filter(l => /:\d+:\d+:/.test(l)).length > 2) return 'passwd';
+  // /etc/shadow
+  if (/^[a-z_][a-z0-9_-]*:\$[0-9ay]/m.test(raw)) return 'shadow';
+  if (/^[a-z_][a-z0-9_-]*:[*!]:/m.test(raw) && raw.split('\n').filter(l => /:/.test(l)).length > 3) return 'shadow';
+  // last
+  if (/^reboot\s+system boot/m.test(raw)) return 'lastlog';
+  if (/pts\/\d+\s+\d+\.\d+\.\d+\.\d+/m.test(raw) && /\(\d{2}:\d{2}\)/m.test(raw)) return 'lastlog';
+  // whoami /all
+  if (/user information/i.test(raw) && /group information/i.test(raw)) return 'whoami';
+  if (/privileges information/i.test(raw) && /se\w+privilege/i.test(raw)) return 'whoami';
+  // sudo -l
+  if (/may run the following commands on/i.test(raw)) return 'sudol';
+  if (/may not run sudo/i.test(raw)) return 'sudol';
+  if (/matching defaults entries for/i.test(raw)) return 'sudol';
+  // net accounts
+  if (/minimum password age/i.test(raw) && /maximum password age/i.test(raw)) return 'netaccounts';
+  // net share
+  if (/share name\s+resource/i.test(raw)) return 'netshare';
   return 'unknown';
 }
 
@@ -267,6 +306,302 @@ export function parseArp(raw) {
   }
 
   return { entries };
+}
+
+// ── net user ─────────────────────────────────────────────────
+// Schema (listing):  { type:'list',   users: [{ username }] }
+// Schema (detail):   { type:'detail', username, fullName, comment, accountActive,
+//                      lastLogon, passwordLastSet, passwordExpires,
+//                      localGroups: [string], globalGroups: [string] }
+
+export function parseNetUser(raw) {
+  if (/user accounts for \\\\/i.test(raw)) {
+    const users = [];
+    let inList = false;
+    for (const line of raw.split('\n')) {
+      if (/user accounts for/i.test(line)) { inList = true; continue; }
+      if (!inList) continue;
+      if (/^-{5,}/.test(line.trim())) continue;
+      if (/the command completed/i.test(line)) break;
+      for (const name of line.trim().split(/\s{2,}/).filter(Boolean))
+        if (name.trim()) users.push({ username: name.trim() });
+    }
+    return { type: 'list', users };
+  }
+
+  function field(re) { return raw.match(re)?.[1]?.trim() ?? null; }
+
+  const localGroups = [], globalGroups = [];
+  for (const line of raw.split('\n')) {
+    const lm = line.match(/local group memberships?\s+(.+)/i);
+    if (lm) localGroups.push(...lm[1].split(/\s+/).filter(s => s.startsWith('*')).map(s => s.slice(1)));
+    const gm = line.match(/global group memberships?\s+(.+)/i);
+    if (gm) globalGroups.push(...gm[1].split(/\s+/).filter(s => s.startsWith('*')).map(s => s.slice(1)));
+  }
+
+  return {
+    type:            'detail',
+    username:        field(/^user name\s+(\S+)/im),
+    fullName:        field(/^full name\s+(.+)/im),
+    comment:         field(/^comment\s+(.+)/im),
+    accountActive:   field(/^account active\s+(\S+)/im)?.toLowerCase() === 'yes',
+    lastLogon:       field(/^last logon\s+(.+)/im),
+    passwordLastSet: field(/^password last set\s+(.+)/im),
+    passwordExpires: field(/^password expires\s+(.+)/im),
+    localGroups,
+    globalGroups,
+  };
+}
+
+// ── net localgroup administrators ────────────────────────
+// Schema: { groupName, members: [{ name, isDomain }] }
+
+export function parseLocalAdmins(raw) {
+  const members = [];
+  let inMembers = false;
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (/^members$/i.test(t))               { inMembers = true; continue; }
+    if (!inMembers)                          continue;
+    if (/^-{5,}/.test(t))                   continue;
+    if (/the command completed/i.test(t))   break;
+    if (t) members.push({ name: t, isDomain: t.includes('\\') });
+  }
+  return {
+    groupName: raw.match(/alias name\s+(\S+)/i)?.[1] ?? 'Administrators',
+    members,
+  };
+}
+
+// ── qwinsta / query session ───────────────────────────────
+// Schema: { sessions: [{ sessionName, username, id, state }] }
+
+export function parseQwinsta(raw) {
+  const sessions = [];
+  let headerFound = false;
+  for (const line of raw.split('\n')) {
+    if (/sessionname\s+username\s+id\s+state/i.test(line)) { headerFound = true; continue; }
+    if (!headerFound) continue;
+    // Match optional leading space, sessionName, optional username, numeric id, state word
+    const m = line.match(/^\s+(\S+)?\s{1,}(\S+)?\s+(\d+)\s+(\w+)/);
+    if (!m) continue;
+    const s1 = m[1]?.trim(), s2 = m[2]?.trim();
+    // Heuristic: if s2 is purely numeric it's probably the ID not a username
+    const idIsS2 = s2 && /^\d+$/.test(s2);
+    sessions.push({
+      sessionName: s1 ?? null,
+      username:    idIsS2 ? null : (s2 ?? null),
+      id:          parseInt(idIsS2 ? s2 : m[3]),
+      state:       m[4] ?? 'Unknown',
+    });
+  }
+  return { sessions };
+}
+
+// ── /etc/passwd ───────────────────────────────────────────
+// Schema: { users: [{ username, uid, gid, info, home, shell,
+//                      isServiceAccount, isLoginShell }] }
+
+export function parsePasswd(raw) {
+  const noLoginShells = ['/sbin/nologin', '/usr/sbin/nologin', '/bin/false', '/dev/null', 'nologin'];
+  const users = [];
+  for (const line of raw.split('\n')) {
+    const parts = line.trim().split(':');
+    if (parts.length < 7) continue;
+    const [username, , uid, gid, info, home, shell] = parts;
+    if (!username || !/^\d+$/.test(uid)) continue;
+    const uidN = parseInt(uid);
+    users.push({
+      username,
+      uid:              uidN,
+      gid:              parseInt(gid),
+      info:             info || null,
+      home:             home || null,
+      shell:            shell?.trim() || null,
+      isServiceAccount: uidN < 1000 || uidN === 65534,
+      isLoginShell:     !noLoginShells.some(s => (shell || '').includes(s)),
+    });
+  }
+  return { users };
+}
+
+// ── /etc/shadow ───────────────────────────────────────────
+// Schema: { entries: [{ username, hasHash, hashAlgo, lastChanged, locked }] }
+
+export function parseShadow(raw) {
+  const algoMap = { '1':'md5', '2a':'bcrypt', '2b':'bcrypt', '2y':'bcrypt',
+                    '5':'sha256', '6':'sha512', 'y':'yescrypt' };
+  const entries = [];
+  for (const line of raw.split('\n')) {
+    const parts = line.trim().split(':');
+    if (parts.length < 2) continue;
+    const [username, hash] = parts;
+    if (!username) continue;
+    const locked  = hash === '*' || hash === '!' || (hash?.startsWith('!') && hash.length > 1);
+    const noHash  = hash === '' || hash === '*' || hash === '!';
+    let hashAlgo  = 'none';
+    if (locked)                              hashAlgo = 'locked';
+    else if (!noHash && hash?.startsWith('$')) {
+      const m = hash.match(/^\$([^$]+)\$/);
+      if (m) hashAlgo = algoMap[m[1]] ?? `$${m[1]}$`;
+    }
+    entries.push({
+      username,
+      hasHash:     !noHash && !locked,
+      hashAlgo,
+      lastChanged: parts[2] ? parseInt(parts[2]) : null,
+      locked,
+    });
+  }
+  return { entries };
+}
+
+// ── last ─────────────────────────────────────────────────
+// Schema: { entries: [{ username, terminal, fromIp, loginTime,
+//                        stillLoggedIn, duration }] }
+
+export function parseLast(raw) {
+  const entries = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (!t || /^wtmp begins/i.test(t)) continue;
+    const m = t.match(/^(\S+)\s+(\S+)\s+(\S+)\s+(.{15,})/);
+    if (!m) continue;
+    const [, username, terminal, from, rest] = m;
+    if (username === 'wtmp') continue;
+    const stillIn = /still logged in/i.test(rest);
+    const dur     = rest.match(/\((\d{2}:\d{2})\)/)?.[1] ?? null;
+    entries.push({
+      username,
+      terminal,
+      fromIp:        from.includes('.') ? from : null,
+      loginTime:     rest.split(/\s+-\s+/)[0].trim(),
+      stillLoggedIn: stillIn,
+      duration:      dur,
+    });
+  }
+  return { entries };
+}
+
+// ── whoami /all ───────────────────────────────────────────
+// Schema: { username, sid, groups: [{ name, type, attributes }],
+//           privileges: [{ name, description, state, enabled }],
+//           isAdmin, dangerousPrivileges: [string] }
+
+export function parseWhoamiAll(raw) {
+  const DANGEROUS = ['SeDebugPrivilege','SeImpersonatePrivilege',
+    'SeAssignPrimaryTokenPrivilege','SeTakeOwnershipPrivilege',
+    'SeLoadDriverPrivilege','SeRestorePrivilege','SeBackupPrivilege',
+    'SeSecurityPrivilege','SeTcbPrivilege'];
+
+  const userSection  = raw.match(/USER INFORMATION[\s\S]*?(?=GROUP INFORMATION|$)/i)?.[0] ?? '';
+  const groupSection = raw.match(/GROUP INFORMATION[\s\S]*?(?=PRIVILEGES INFORMATION|$)/i)?.[0] ?? '';
+  const privSection  = raw.match(/PRIVILEGES INFORMATION[\s\S]*/i)?.[0] ?? '';
+
+  const userLine = userSection.split('\n').find(l => /S-1-/.test(l));
+  const uParts   = userLine?.trim().split(/\s{2,}/) ?? [];
+
+  const groups = [];
+  for (const line of groupSection.split('\n')) {
+    const t = line.trim();
+    if (!t || /^[= ]/.test(line) || /group name/i.test(t)) continue;
+    const parts = t.split(/\s{2,}/);
+    if (parts.length >= 2) groups.push({ name: parts[0], type: parts[1] ?? null, attributes: parts[3] ?? null });
+  }
+
+  const privileges = [];
+  for (const line of privSection.split('\n')) {
+    const t = line.trim();
+    if (!t || /^[= ]/.test(line) || /privilege name/i.test(t)) continue;
+    const parts = t.split(/\s{2,}/);
+    if (parts.length >= 2 && /^Se/i.test(parts[0])) {
+      privileges.push({ name: parts[0], description: parts[1] ?? null,
+        state: parts[2] ?? 'Unknown', enabled: /enabled/i.test(parts[2] ?? '') });
+    }
+  }
+
+  const isAdmin = groups.some(g => /administrators|domain admins/i.test(g.name ?? ''));
+  const dangerousPrivileges = privileges
+    .filter(p => p.enabled && DANGEROUS.includes(p.name)).map(p => p.name);
+
+  return { username: uParts[0] ?? null, sid: uParts[1] ?? null,
+           groups, privileges, isAdmin, dangerousPrivileges };
+}
+
+// ── sudo -l ───────────────────────────────────────────────
+// Schema: { canRunSudo, username, hostname, canRunAll,
+//           entries: [{ runAs, nopasswd, commands: [string] }] }
+
+export function parseSudoL(raw) {
+  if (/may not run sudo/i.test(raw))
+    return { canRunSudo: false, username: null, hostname: null, canRunAll: false, entries: [] };
+
+  const hm       = raw.match(/user (\S+) may run.*on (\S+):/i);
+  const entries  = [];
+  let inEntries  = false;
+
+  for (const line of raw.split('\n')) {
+    if (/may run the following commands/i.test(line)) { inEntries = true; continue; }
+    if (!inEntries) continue;
+    const t = line.trim();
+    if (!t || t.startsWith('Matching')) continue;
+    const m = t.match(/^\(([^)]+)\)\s*(NOPASSWD:\s*)?(.+)/i);
+    if (m) entries.push({ runAs: m[1], nopasswd: !!m[2],
+                          commands: m[3].split(',').map(c => c.trim()) });
+  }
+
+  return {
+    canRunSudo: true,
+    username:   hm?.[1] ?? null,
+    hostname:   hm?.[2] ?? null,
+    canRunAll:  entries.some(e => e.commands.includes('ALL') && e.runAs.includes('ALL')),
+    entries,
+  };
+}
+
+// ── net accounts ─────────────────────────────────────────
+// Schema: { minPasswordAge, maxPasswordAge, minPasswordLength,
+//           passwordHistory, lockoutThreshold, lockoutDuration,
+//           lockoutWindow, computerRole }
+
+export function parseNetAccounts(raw) {
+  function num(re) {
+    const v = raw.match(re)?.[1]?.trim();
+    return v === undefined ? null : /^\d+$/.test(v) ? parseInt(v) : v;
+  }
+  return {
+    minPasswordAge:    num(/minimum password age.*?:\s*(\S+)/i),
+    maxPasswordAge:    num(/maximum password age.*?:\s*(\S+)/i),
+    minPasswordLength: num(/minimum password length.*?:\s*(\d+)/i),
+    passwordHistory:   num(/length of password history.*?:\s*(\S+)/i),
+    lockoutThreshold:  num(/lockout threshold.*?:\s*(\S+)/i),
+    lockoutDuration:   num(/lockout duration.*?:\s*(\S+)/i),
+    lockoutWindow:     num(/lockout observation.*?:\s*(\S+)/i),
+    computerRole:      raw.match(/computer role.*?:\s*(.+)/i)?.[1]?.trim() ?? null,
+  };
+}
+
+// ── net share ────────────────────────────────────────────
+// Schema: { shares: [{ name, path, remark, isAdmin }] }
+
+export function parseNetShare(raw) {
+  const ADMIN = new Set(['C$','D$','E$','ADMIN$','IPC$','PRINT$','FAX$']);
+  const shares = [];
+  let inShares = false;
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (/share name\s+resource/i.test(t)) { inShares = true; continue; }
+    if (!inShares)                          continue;
+    if (/^-{5,}/.test(t))                  continue;
+    if (/the command completed/i.test(t))   break;
+    if (!t)                                 continue;
+    const parts = t.split(/\s{2,}/);
+    const name  = parts[0];
+    if (name) shares.push({ name, path: parts[1] ?? null,
+                             remark: parts[2] ?? null,
+                             isAdmin: ADMIN.has(name.toUpperCase()) });
+  }
+  return { shares };
 }
 
 // ── File-based import parsers ─────────────────────────────

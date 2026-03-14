@@ -55,6 +55,63 @@ function uname(shortname, kernel) {
   return `Linux ${shortname} ${kernel} #1 SMP x86_64 GNU/Linux`;
 }
 
+function netUserList(hostname, users) {
+  const lines = [];
+  for (let i = 0; i < users.length; i += 3)
+    lines.push(users.slice(i, i + 3).map(u => u.padEnd(24)).join(''));
+  return `User accounts for \\\\${hostname}\n\n-------------------------------------------------------------------------------\n${lines.join('\n')}\nThe command completed successfully.`;
+}
+
+function localAdmins(members) {
+  return `Alias name     administrators\nComment        Administrators have complete and unrestricted access to the computer/domain\n\nMembers\n\n-------------------------------------------------------------------------------\n${members.join('\n')}\nThe command completed successfully.`;
+}
+
+function qwinsta(sessions) {
+  const header = ' SESSIONNAME       USERNAME                 ID  STATE   TYPE        DEVICE';
+  const rows = sessions.map(s =>
+    ` ${(s[0] || '').padEnd(18)}${(s[1] || '').padEnd(25)}${String(s[2]).padEnd(4)}${s[3]}`
+  );
+  return [header, ...rows].join('\n');
+}
+
+function etcPasswd(users) {
+  return users.map(u => `${u[0]}:x:${u[1]}:${u[1]}:${u[2]}:/home/${u[0]}:${u[3]}`).join('\n');
+}
+
+function etcShadow(users) {
+  return users.map(u => `${u[0]}:${u[1]}:19400:0:99999:7:::`).join('\n');
+}
+
+function lastLog(entries) {
+  return entries.map(e => `${e[0].padEnd(9)}${e[1].padEnd(13)}${(e[2] || '').padEnd(17)}Mon Mar 10 ${e[3]}  (${e[4]})`).join('\n') +
+    '\nreboot   system boot  5.4.0-182-generic Mon Mar 10 08:00\nwtmp begins Mon Feb 10 00:00:00 2025';
+}
+
+function sudoL(username, hostname, entries) {
+  const entryLines = entries.map(e => `    (${e[0]}) ${e[1] ? 'NOPASSWD: ' : ''}${e[2]}`).join('\n');
+  return `Matching Defaults entries for ${username} on ${hostname}:\n    env_reset, mail_badpass, secure_path=/usr/local/sbin\n\nUser ${username} may run the following commands on ${hostname}:\n${entryLines}`;
+}
+
+function netAccounts(role, minLen, maxAge, lockout) {
+  return `Force user logoff how long after time expires?:       Never\nMinimum password age (days):                          1\nMaximum password age (days):                          ${maxAge}\nMinimum password length:                              ${minLen}\nLength of password history maintained:                24\nLockout threshold:                                    ${lockout}\nLockout duration (minutes):                           30\nLockout observation window (minutes):                 30\nComputer role:                                        ${role}\nThe command completed successfully.`;
+}
+
+function netShare(shares) {
+  const header = 'Share name   Resource                        Remark\n\n-------------------------------------------------------------------------------';
+  const rows = shares.map(s => `${s[0].padEnd(13)}${(s[1] || '').padEnd(32)}${s[2] || ''}`);
+  return `${header}\n${rows.join('\n')}\nThe command completed successfully.`;
+}
+
+function whoamiAll(domain, username, sid, groups, privs) {
+  const groupRows = groups.map(g =>
+    `${g[0].padEnd(41)}${g[1].padEnd(17)}${g[2].padEnd(13)}Mandatory group, Enabled by default, Enabled group`
+  ).join('\n');
+  const privRows = privs.map(p =>
+    `${p[0].padEnd(30)}${p[1].padEnd(37)}${p[2]}`
+  ).join('\n');
+  return `USER INFORMATION\n----------------\n\nUser Name           SID\n=================== ==============================================\n${domain}\\${username}         ${sid}\n\n\nGROUP INFORMATION\n-----------------\n\nGroup Name                               Type             SID          Attributes\n======================================== ================ ============ ==================================================\n${groupRows}\n\n\nPRIVILEGES INFORMATION\n----------------------\n\nPrivilege Name                Description                          State\n============================= ==================================== ========\n${privRows}`;
+}
+
 function snap(id, hostId, commandType, osFamily, rawOutput, daysAgoVal, hoursOffset = 0) {
   return { id, hostId, commandType, osFamily, rawOutput, parsed: null, timestamp: daysAgo(daysAgoVal, hoursOffset) };
 }
@@ -430,5 +487,128 @@ export const mockSnapshots = {
     snap('mock-s-web02-2', H.WEB02,   'netstat',  'linux',   netstatLin('10.10.2.11'),              4),
     snap('mock-s-db01-1',  H.DB01,    'uname',    'linux',   uname('db01', '3.10.0-1160.el7.x86_64'), 12),
     snap('mock-s-db01-2',  H.DB01,    'netstat',  'linux',   netstatLin('10.10.2.20'),              3),
+
+    // ── net user (DC01 — domain user listing) ────────────
+    snap('mock-snap-netuser-dc01', H.DC01, 'netuser', 'windows',
+      netUserList('DC01', ['Administrator','Guest','krbtgt','jsmith','mthomas','cbrown','rlee','svc_backup','svc_web']),
+      20),
+
+    // ── net localgroup administrators (FS01 — svc_backup is local admin) ──
+    snap('mock-snap-localadmins-fs01', H.FS01, 'localadmins', 'windows',
+      localAdmins(['Administrator', 'CORP\\Domain Admins', 'CORP\\svc_backup']),
+      22),
+
+    // ── net localgroup administrators (DC01) ─────────────
+    snap('mock-snap-localadmins-dc01', H.DC01, 'localadmins', 'windows',
+      localAdmins(['Administrator', 'CORP\\Domain Admins']),
+      21),
+
+    // ── qwinsta (JSMITH — active session) ────────────────
+    snap('mock-snap-sessions-jsmith', H.JSMITH, 'sessions', 'windows',
+      qwinsta([['console', 'jsmith', 1, 'Active'], ['services', '', 0, 'Disc']]),
+      28),
+
+    // ── qwinsta (DC01 — attacker session via pass-the-hash) ──
+    snap('mock-snap-sessions-dc01', H.DC01, 'sessions', 'windows',
+      qwinsta([['rdp-tcp#0', 'Administrator', 2, 'Active'], ['console', 'SYSTEM', 1, 'Active'], ['services', '', 0, 'Disc']]),
+      21),
+
+    // ── whoami /all (JSMITH — post-compromise privs) ──────
+    snap('mock-snap-whoami-jsmith', H.JSMITH, 'whoami', 'windows',
+      whoamiAll('CORP', 'jsmith', 'S-1-5-21-1234567890-1234567890-1234567890-1103',
+        [
+          ['Everyone',             'Well-known group', 'S-1-1-0'],
+          ['BUILTIN\\Administrators', 'Alias',          'S-1-5-32-544'],
+          ['CORP\\Domain Users',   'Group',             'S-1-5-21-...-513'],
+        ],
+        [
+          ['SeImpersonatePrivilege', 'Impersonate a client after authentication', 'Enabled'],
+          ['SeDebugPrivilege',       'Debug programs',                            'Enabled'],
+          ['SeChangeNotifyPrivilege','Bypass traverse checking',                  'Enabled'],
+        ]),
+      28),
+
+    // ── net accounts (DC01 — domain password policy) ──────
+    snap('mock-snap-netaccounts-dc01', H.DC01, 'netaccounts', 'windows',
+      netAccounts('PRIMARY', 7, 90, 5),
+      20),
+
+    // ── net share (FS01 — Finance and HR shares) ──────────
+    snap('mock-snap-netshare-fs01', H.FS01, 'netshare', 'windows',
+      netShare([
+        ['C$',       'C:\\',                        'Default share'],
+        ['IPC$',     '',                            'Remote IPC'],
+        ['ADMIN$',   'C:\\Windows',                 'Remote Admin'],
+        ['Finance',  'C:\\Shares\\Finance',         'Financial reports — restricted'],
+        ['HR',       'C:\\Shares\\HR',              'HR documents'],
+        ['NETLOGON', 'C:\\Windows\\SYSVOL\\sysvol\\corp.local\\SCRIPTS', 'Logon server share'],
+        ['SYSVOL',   'C:\\Windows\\SYSVOL\\sysvol', 'Logon server share'],
+      ]),
+      22),
+
+    // ── /etc/passwd (JENKINS) ─────────────────────────────
+    snap('mock-snap-passwd-jenkins', H.JENKINS, 'passwd', 'linux',
+      'root:x:0:0:root:/root:/bin/bash\n' +
+      'daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n' +
+      'syslog:x:104:110::/home/syslog:/usr/sbin/nologin\n' +
+      'jenkins:x:112:118:Jenkins,,,:/var/lib/jenkins:/bin/bash\n' +
+      'jsmith:x:1001:1001:John Smith,,,:/home/jsmith:/bin/bash\n' +
+      'svc_deploy:x:1002:1002:Deploy Service,,,:/home/svc_deploy:/bin/bash',
+      18),
+
+    // ── /etc/shadow (JENKINS) ────────────────────────────
+    snap('mock-snap-shadow-jenkins', H.JENKINS, 'shadow', 'linux',
+      'root:$6$rounds=5000$randsalt1$roothashabcdef0123456789abcdef0123456789abcdef0123456789abcdef012345:19400:0:99999:7:::\n' +
+      'daemon:*:18397:0:99999:7:::\n' +
+      'jenkins:$6$rounds=5000$jenksalt1$jenkinshashabcdef0123456789abcdef0123456789abcdef0123456789abcdef01:19380:0:99999:7:::\n' +
+      'jsmith:$6$rounds=5000$jsmsalt01$jsmithhashabcdef0123456789abcdef0123456789abcdef0123456789abcdef012:19400:0:99999:7:::\n' +
+      'svc_deploy:$6$rounds=5000$deplsalt1$deployhashabcdef0123456789abcdef0123456789abcdef0123456789abcdef01:19400:0:99999:7:::',
+      18),
+
+    // ── last (JENKINS — logins from DC01 and JSMITH IPs) ──
+    snap('mock-snap-last-jenkins', H.JENKINS, 'lastlog', 'linux',
+      lastLog([
+        ['jsmith',     'pts/0', '10.10.3.55', '09:15', '08:15'],
+        ['root',       'pts/1', '10.10.1.5',  '22:12', '00:33'],
+        ['jsmith',     'pts/0', '10.10.3.55', '08:30', '09:15'],
+        ['svc_deploy', 'pts/2', '10.10.1.30', '03:00', '00:15'],
+      ]),
+      18),
+
+    // ── sudo -l (JENKINS — docker NOPASSWD = easy privesc) ─
+    snap('mock-snap-sudol-jenkins', H.JENKINS, 'sudol', 'linux',
+      sudoL('jsmith', 'jenkins', [
+        ['root', true,  '/usr/bin/docker'],
+        ['root', true,  '/bin/systemctl restart jenkins'],
+        ['root', true,  '/bin/systemctl restart nginx'],
+      ]),
+      18),
+
+    // ── /etc/passwd (WEB01) ───────────────────────────────
+    snap('mock-snap-passwd-web01', H.WEB01, 'passwd', 'linux',
+      'root:x:0:0:root:/root:/bin/bash\n' +
+      'daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n' +
+      'www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\n' +
+      'jsmith:x:1001:1001:John Smith,,,:/home/jsmith:/bin/bash\n' +
+      'svc_web:x:1002:1002:Web Service,,,:/home/svc_web:/bin/bash',
+      14),
+
+    // ── /etc/shadow (WEB01) ───────────────────────────────
+    snap('mock-snap-shadow-web01', H.WEB01, 'shadow', 'linux',
+      'root:$6$rounds=5000$web01salt$web01roothashabcdef0123456789abcdef0123456789abcdef0123456789abcdef0:19400:0:99999:7:::\n' +
+      'daemon:*:18397:0:99999:7:::\n' +
+      'www-data:!:19380:0:99999:7:::\n' +
+      'jsmith:$6$rounds=5000$web01jsm$web01jsmithhashabcdef0123456789abcdef0123456789abcdef0123456789abcd:19400:0:99999:7:::\n' +
+      'svc_web:$6$rounds=5000$svcwbslt$svcwebhashabcdef0123456789abcdef0123456789abcdef0123456789abcdef01:19400:0:99999:7:::',
+      14),
+
+    // ── last (WEB01) ──────────────────────────────────────
+    snap('mock-snap-last-web01', H.WEB01, 'lastlog', 'linux',
+      lastLog([
+        ['jsmith',   'pts/0', '10.10.2.30', '14:22', '03:10'],
+        ['root',     'pts/1', '10.10.2.30', '14:05', '00:17'],
+        ['svc_web',  'pts/2', '10.10.1.30', '02:00', '00:05'],
+      ]),
+      14),
   ],
 };

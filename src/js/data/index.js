@@ -1,7 +1,9 @@
 import { Auth } from 'aws-amplify';
 import { DEBUG_MODE } from '../config.js';
 import { mockEngagements, mockEngagementData, mockSnapshots, mockImports, MOCK_ENG_ID } from './mockScenario.js';
-import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp } from './parsers.js';
+import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
+         parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
+         parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare } from './parsers.js';
 
 
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
@@ -78,11 +80,21 @@ function applyParsers(snap) {
   if (snap.parsed !== null && snap.parsed !== undefined) return snap;
   let parsed = null;
   try {
-    if (snap.commandType === 'netstat')  parsed = parseNetstat(snap.rawOutput, snap.osFamily);
-    if (snap.commandType === 'pslist')   parsed = parsePslist(snap.rawOutput, snap.osFamily);
-    if (snap.commandType === 'ipconfig') parsed = parseIpconfig(snap.rawOutput, snap.osFamily);
-    if (snap.commandType === 'uname')    parsed = parseUname(snap.rawOutput);
-    if (snap.commandType === 'arp')      parsed = parseArp(snap.rawOutput);
+    if (snap.commandType === 'netstat')     parsed = parseNetstat(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'pslist')      parsed = parsePslist(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'ipconfig')    parsed = parseIpconfig(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'uname')       parsed = parseUname(snap.rawOutput);
+    if (snap.commandType === 'arp')         parsed = parseArp(snap.rawOutput);
+    if (snap.commandType === 'netuser')     parsed = parseNetUser(snap.rawOutput);
+    if (snap.commandType === 'localadmins') parsed = parseLocalAdmins(snap.rawOutput);
+    if (snap.commandType === 'sessions')    parsed = parseQwinsta(snap.rawOutput);
+    if (snap.commandType === 'passwd')      parsed = parsePasswd(snap.rawOutput);
+    if (snap.commandType === 'shadow')      parsed = parseShadow(snap.rawOutput);
+    if (snap.commandType === 'lastlog')     parsed = parseLast(snap.rawOutput);
+    if (snap.commandType === 'whoami')      parsed = parseWhoamiAll(snap.rawOutput);
+    if (snap.commandType === 'sudol')       parsed = parseSudoL(snap.rawOutput);
+    if (snap.commandType === 'netaccounts') parsed = parseNetAccounts(snap.rawOutput);
+    if (snap.commandType === 'netshare')    parsed = parseNetShare(snap.rawOutput);
   } catch (e) { console.warn('[carto] Parse error:', e); }
   return { ...snap, parsed };
 }
