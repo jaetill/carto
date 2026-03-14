@@ -190,9 +190,11 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
   const rightPanel = document.createElement('div');
   rightPanel.className = 'w-64 flex-shrink-0 flex flex-col gap-2 overflow-y-auto';
 
-  // Info card — shown on node tap, hidden by default
+  // Info card — always visible at fixed height to prevent accordion shift
   const infoCard = document.createElement('div');
-  infoCard.className = 'hidden rounded-lg border border-slate-200 bg-white p-3 flex-shrink-0';
+  infoCard.className = 'rounded-lg border border-slate-200 bg-white p-3 flex-shrink-0 overflow-hidden';
+  infoCard.style.height = '108px';
+  infoCard.innerHTML = '<p class="text-xs text-slate-400 italic h-full flex items-center justify-center">Click a node to inspect</p>';
   rightPanel.appendChild(infoCard);
 
   wrap.appendChild(graphDiv);
@@ -292,7 +294,6 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
 
   function showInfoCard(d) {
     infoCard.innerHTML = '';
-    infoCard.classList.remove('hidden');
 
     if (d.type === 'host') {
       const isFocal = d.id === host.id;
@@ -327,7 +328,11 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
   }
 
   cy.on('tap', 'node', (e) => showInfoCard(e.target.data()));
-  cy.on('tap', (e) => { if (e.target === cy) { infoCard.classList.add('hidden'); infoCard.innerHTML = ''; } });
+  cy.on('tap', (e) => {
+    if (e.target === cy) {
+      infoCard.innerHTML = '<p class="text-xs text-slate-400 italic h-full flex items-center justify-center">Click a node to inspect</p>';
+    }
+  });
   cy.on('dbltap', 'node[type="host"]', (e) => {
     const id = e.target.data('id');
     if (id !== host.id && onHostNavigate) onHostNavigate(id);
