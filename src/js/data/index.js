@@ -3,6 +3,7 @@ import { DEBUG_MODE } from '../config.js';
 import { mockEngagements, mockEngagementData, mockSnapshots, MOCK_ENG_ID } from './mockScenario.js';
 import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp } from './parsers.js';
 
+
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
 // ── API helpers ───────────────────────────────────────────
@@ -106,6 +107,20 @@ export async function saveSnapshots(engagementId, snapshots) {
   await apiPost(`/engagement/${engagementId}/snapshots`, snapshots);
 }
 
+// ── Imports ───────────────────────────────────────────────
+// Engagement-level file imports (Nmap, Metasploit, SharpHound, etc.)
+// Stored at engagements/{id}/imports.json via Lambda route /engagement/{id}/imports
+
+export async function loadImports(engagementId) {
+  if (mockMode) return [];
+  return await apiGet(`/engagement/${engagementId}/imports`) || [];
+}
+
+export async function saveImports(engagementId, imports) {
+  if (mockMode) return;
+  await apiPost(`/engagement/${engagementId}/imports`, imports);
+}
+
 // ── Factory functions ─────────────────────────────────────
 
 export function newEngagement(overrides = {}) {
@@ -144,6 +159,18 @@ export function newSnapshot(overrides = {}) {
     rawOutput:   '',
     parsed:      null,
     timestamp:   Date.now(),
+    ...overrides,
+  };
+}
+
+export function newImport(overrides = {}) {
+  return {
+    id:         crypto.randomUUID(),
+    importType: '', // 'nmap' | 'metasploit' | 'sharphound' | 'nuclei' | 'nessus' | 'ghostwriter'
+    fileName:   '',
+    importedAt: Date.now(),
+    parsed:     null,
+    summary:    {}, // type-specific quick stats for display
     ...overrides,
   };
 }

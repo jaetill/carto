@@ -269,6 +269,329 @@ export function parseArp(raw) {
   return { entries };
 }
 
+// ── File-based import parsers ─────────────────────────────
+//
+// These parse tool output files (XML, JSONL, ZIP, CSV) rather than paste-in
+// terminal output. Each normalizes its input into a consistent schema.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARPHOUND / BLOODHOUND schema  (model defined — parser not yet implemented)
+// Input: ZIP of typed JSON files from SharpHound.exe, bloodhound-python,
+//        RustHound-CE, or AzureHound.
+// Schema:
+// {
+//   collectedAt:  timestamp | null,
+//   domain:       string | null,
+//   version:      number | null,
+//   users:      [{ objectId, name, domain, enabled, lastLogon, pwdLastSet,
+//                  hasSPN, adminCount, memberOf: [objectId] }],
+//   computers:  [{ objectId, name, domain, enabled, os,
+//                  unconstrainedDelegation, localAdmins: [objectId],
+//                  sessions: [{ userId, isAdmin }] }],
+//   groups:     [{ objectId, name, domain,
+//                  members: [{ objectId, objectType }] }],
+//   domains:    [{ objectId, name,
+//                  trusts: [{ targetDomain, trustType, trustDirection,
+//                             isTransitive }] }],
+//   gpos:       [{ objectId, name, guid, domain }],
+//   aces:       [{ principalSid, principalType, rightName, objectSid,
+//                  objectType, isInherited }],
+// }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// NUCLEI schema  (model defined — parser not yet implemented)
+// Input: nuclei -j / -json-export output (JSONL — one object per line)
+// Schema:
+// {
+//   findings: [{
+//     templateId:       string,
+//     name:             string,
+//     severity:         'info' | 'low' | 'medium' | 'high' | 'critical',
+//     tags:             [string],
+//     cveIds:           [string],
+//     cvssScore:        number | null,
+//     host:             string,
+//     ip:               string | null,
+//     matchedAt:        string,
+//     timestamp:        timestamp,
+//     extractedResults: [string],
+//     curlCommand:      string | null,
+//   }]
+// }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// NESSUS schema  (model defined — parser not yet implemented)
+// Input: .nessus export (Nessus v2 XML) or OpenVAS/GVM XML (same structure)
+// Schema:
+// {
+//   policyName: string | null,
+//   hosts: [{
+//     ip:        string,
+//     hostname:  string | null,
+//     os:        string | null,
+//     mac:       string | null,
+//     scanStart: timestamp | null,
+//     scanEnd:   timestamp | null,
+//     findings: [{
+//       port:             number,
+//       protocol:         string,
+//       severity:         0 | 1 | 2 | 3 | 4,  // 0=info … 4=critical
+//       pluginId:         string,
+//       pluginName:       string,
+//       synopsis:         string | null,
+//       description:      string | null,
+//       solution:         string | null,
+//       cvssScore:        number | null,
+//       cvss3Score:       number | null,
+//       cveIds:           [string],
+//       exploitAvailable: boolean,
+//       pluginOutput:     string | null,
+//     }]
+//   }]
+// }
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// GHOSTWRITER OPLOG schema  (model defined — parser not yet implemented)
+// Input: Ghostwriter CSV export or GraphQL JSON
+// Schema:
+// {
+//   entries: [{
+//     startDate:    timestamp | null,
+//     endDate:      timestamp | null,
+//     sourceIp:     string | null,
+//     destIp:       string | null,
+//     destHost:     string | null,
+//     tool:         string | null,
+//     userContext:  string | null,
+//     command:      string | null,
+//     description:  string | null,
+//     output:       string | null,
+//     comments:     string | null,
+//     operatorName: string | null,
+//     tags:         [string],
+//   }]
+// }
+
+export function detectFileType(fileName, content) {
+  const ext = (fileName.split('.').pop() || '').toLowerCase();
+  if (ext === 'zip')    return 'sharphound';
+  if (ext === 'jsonl')  return 'nuclei';
+  if (ext === 'nessus') return 'nessus';
+  if (ext === 'csv')    return 'ghostwriter';
+
+  // For XML / JSON sniff the first 2 KB
+  const head = content.slice(0, 2048);
+  if (head.includes('<nmaprun'))              return 'nmap';
+  if (head.includes('<MetasploitV5') ||
+      head.includes('<MetasploitV4'))         return 'metasploit';
+  if (head.includes('<NessusClientData'))     return 'nessus';
+  if (head.includes('<report') &&
+      head.includes('<results>'))             return 'openvas';
+
+  // JSONL — check first line for nuclei shape
+  if (ext === 'json' || ext === 'jsonl') {
+    try {
+      const obj = JSON.parse(content.trim().split('\n')[0]);
+      if (obj['template-id'] && obj['info']) return 'nuclei';
+    } catch {}
+  }
+
+  return 'unknown';
+}
+
+// ── Nmap XML parser ───────────────────────────────────────
+// Input:  nmap -oX output.xml (or -oA)
+// Schema:
+// {
+//   scanArgs:   string | null,
+//   scanStart:  timestamp | null,
+//   scanEnd:    timestamp | null,
+//   hostsTotal: number,
+//   hostsUp:    number,
+//   hosts: [{
+//     ip:        string | null,
+//     mac:       string | null,
+//     vendor:    string | null,
+//     hostnames: [{ name, type }],
+//     status:    string,
+//     os:        { name, accuracy, family, generation, type } | null,
+//     ports:     [{ port, protocol, state,
+//                   service: { name, product, version, extrainfo, ostype } | null }],
+//     scripts:   [{ id, output }],
+//   }]
+// }
+
+export function parseNmap(xmlString) {
+  const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Invalid Nmap XML');
+  const nmaprun = doc.querySelector('nmaprun');
+  if (!nmaprun) throw new Error('Not a valid Nmap XML file — missing <nmaprun>');
+
+  const finished = doc.querySelector('runstats > finished');
+  const hostsEl  = doc.querySelector('runstats > hosts');
+
+  const result = {
+    scanArgs:   nmaprun.getAttribute('args') || null,
+    scanStart:  nmaprun.getAttribute('start')     ? parseInt(nmaprun.getAttribute('start'))     * 1000 : null,
+    scanEnd:    finished?.getAttribute('time')     ? parseInt(finished.getAttribute('time'))     * 1000 : null,
+    hostsTotal: parseInt(hostsEl?.getAttribute('total') || '0'),
+    hostsUp:    parseInt(hostsEl?.getAttribute('up')    || '0'),
+    hosts:      [],
+  };
+
+  doc.querySelectorAll('host').forEach(hostEl => {
+    let ip = null, mac = null, vendor = null;
+    hostEl.querySelectorAll('address').forEach(addr => {
+      const type = addr.getAttribute('addrtype');
+      if (type === 'ipv4' || type === 'ipv6') ip = addr.getAttribute('addr');
+      if (type === 'mac') { mac = addr.getAttribute('addr'); vendor = addr.getAttribute('vendor') || null; }
+    });
+
+    const hostnames = [...hostEl.querySelectorAll('hostname')].map(h => ({
+      name: h.getAttribute('name'),
+      type: h.getAttribute('type'),
+    }));
+
+    const ports = [...hostEl.querySelectorAll('port')].map(portEl => {
+      const svc = portEl.querySelector('service');
+      return {
+        port:     parseInt(portEl.getAttribute('portid')),
+        protocol: portEl.getAttribute('protocol'),
+        state:    portEl.querySelector('state')?.getAttribute('state') || 'unknown',
+        service:  svc ? {
+          name:      svc.getAttribute('name')      || null,
+          product:   svc.getAttribute('product')   || null,
+          version:   svc.getAttribute('version')   || null,
+          extrainfo: svc.getAttribute('extrainfo') || null,
+          ostype:    svc.getAttribute('ostype')    || null,
+        } : null,
+      };
+    });
+
+    const scripts = [...hostEl.querySelectorAll('hostscript > script')].map(s => ({
+      id:     s.getAttribute('id'),
+      output: s.getAttribute('output'),
+    }));
+
+    let os = null;
+    const osmatch = hostEl.querySelector('osmatch');
+    if (osmatch) {
+      const osclass = osmatch.querySelector('osclass');
+      os = {
+        name:       osmatch.getAttribute('name')             || null,
+        accuracy:   parseInt(osmatch.getAttribute('accuracy') || '0'),
+        family:     osclass?.getAttribute('osfamily')        || null,
+        generation: osclass?.getAttribute('osgen')           || null,
+        type:       osclass?.getAttribute('type')            || null,
+      };
+    }
+
+    result.hosts.push({
+      ip,
+      mac,
+      vendor,
+      hostnames,
+      status:  hostEl.querySelector('status')?.getAttribute('state') || 'unknown',
+      os,
+      ports,
+      scripts,
+    });
+  });
+
+  return result;
+}
+
+// ── Metasploit XML parser ─────────────────────────────────
+// Input:  Metasploit db_export -f xml
+// Schema:
+// {
+//   hosts:       [{ ip, mac, hostname, state, purpose, arch,
+//                   os: { name, flavor, sp } | null }],
+//   services:    [{ hostIp, port, protocol, state, name, banner }],
+//   vulns:       [{ hostIp, name, refs: [string] }],
+//   credentials: [{ username, secret, secretType, hostIp, port, protocol }],
+//   sessions:    [{ hostIp, sessionType, platform, exploit,
+//                   openedAt, closedAt }],
+// }
+
+export function parseMetasploit(xmlString) {
+  const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Invalid XML');
+  if (!doc.querySelector('MetasploitV5, MetasploitV4'))
+    throw new Error('Not a valid Metasploit XML export — missing <MetasploitV5>');
+
+  // Build host-id → IP map for cross-referencing services/vulns/creds/sessions
+  const hostMap = new Map();
+
+  const hosts = [...doc.querySelectorAll('hosts > host')].map(h => {
+    const id  = h.querySelector('id')?.textContent?.trim();
+    const ip  = h.querySelector('address')?.textContent?.trim() || null;
+    if (id) hostMap.set(id, ip);
+    const osName   = h.querySelector('os_name')?.textContent?.trim()   || null;
+    const osFlavor = h.querySelector('os_flavor')?.textContent?.trim() || null;
+    const osSp     = h.querySelector('os_sp')?.textContent?.trim()     || null;
+    return {
+      ip,
+      mac:      h.querySelector('mac')?.textContent?.trim()     || null,
+      hostname: h.querySelector('name')?.textContent?.trim()    || null,
+      state:    h.querySelector('state')?.textContent?.trim()   || null,
+      purpose:  h.querySelector('purpose')?.textContent?.trim() || null,
+      arch:     h.querySelector('arch')?.textContent?.trim()    || null,
+      os:       osName ? { name: osName, flavor: osFlavor, sp: osSp } : null,
+    };
+  });
+
+  const services = [...doc.querySelectorAll('services > service')].map(s => {
+    const hostId   = s.querySelector('host-id')?.textContent?.trim();
+    const hostAddr = s.querySelector('host')?.getAttribute('addr');
+    return {
+      hostIp:   hostAddr || hostMap.get(hostId) || null,
+      port:     parseInt(s.querySelector('port')?.textContent?.trim()  || '0'),
+      protocol: s.querySelector('proto')?.textContent?.trim()          || null,
+      state:    s.querySelector('state')?.textContent?.trim()          || null,
+      name:     s.querySelector('name')?.textContent?.trim()           || null,
+      banner:   s.querySelector('info')?.textContent?.trim()           || null,
+    };
+  });
+
+  const vulns = [...doc.querySelectorAll('vulns > vuln')].map(v => {
+    const hostId   = v.querySelector('host-id')?.textContent?.trim();
+    const hostAddr = v.querySelector('host')?.getAttribute('addr');
+    return {
+      hostIp: hostAddr || hostMap.get(hostId) || null,
+      name:   v.querySelector('name')?.textContent?.trim()  || null,
+      refs:   [...v.querySelectorAll('refs > ref')].map(r => r.textContent.trim()),
+    };
+  });
+
+  const credentials = [...doc.querySelectorAll('creds > cred')].map(c => {
+    const hostId = c.querySelector('host-id')?.textContent?.trim();
+    const priv   = c.querySelector('private');
+    return {
+      username:   c.querySelector('username')?.textContent?.trim()              || null,
+      secret:     priv?.textContent?.trim()                                     || null,
+      secretType: priv?.getAttribute('type')                                    || null,
+      hostIp:     hostMap.get(hostId)                                           || null,
+      port:       parseInt(c.querySelector('service-port')?.textContent?.trim() || '0') || null,
+      protocol:   c.querySelector('service-proto')?.textContent?.trim()         || null,
+    };
+  });
+
+  const sessions = [...doc.querySelectorAll('sessions > session')].map(s => {
+    const hostId = s.querySelector('host-id')?.textContent?.trim();
+    return {
+      hostIp:      hostMap.get(hostId)                                       || null,
+      sessionType: s.querySelector('stype')?.textContent?.trim()             || null,
+      platform:    s.querySelector('platform')?.textContent?.trim()          || null,
+      exploit:     s.querySelector('via-exploit')?.textContent?.trim()       || null,
+      openedAt:    s.querySelector('opened-at')?.textContent?.trim()         || null,
+      closedAt:    s.querySelector('closed-at')?.textContent?.trim()         || null,
+    };
+  });
+
+  return { hosts, services, vulns, credentials, sessions };
+}
+
 // ── Diff helpers ──────────────────────────────────────────
 
 export function diffSnapshots(prev, curr) {

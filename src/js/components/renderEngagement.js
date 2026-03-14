@@ -1,4 +1,5 @@
-import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, newHost, newNote, saveEngagements } from '../data/index.js';
+import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, loadImports, saveImports, newHost, newNote, newImport, saveEngagements } from '../data/index.js';
+import { detectFileType, parseNmap, parseMetasploit } from '../data/parsers.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
@@ -12,6 +13,7 @@ export async function renderEngagement(engagementId) {
 
   let data      = await loadEngagementData(engagementId);
   let snapshots = await loadSnapshots(engagementId);
+  let imports   = await loadImports(engagementId);
 
   // Subnet collapse state — null means "not yet initialized"
   let collapsedSubnets = null;
@@ -96,11 +98,18 @@ export async function renderEngagement(engagementId) {
     const hostsTitle = document.createElement('h3');
     hostsTitle.className = 'text-sm font-semibold text-slate-700';
     hostsTitle.textContent = 'Hosts';
+    const hostBtns = document.createElement('div');
+    hostBtns.className = 'flex gap-2';
+    const importBtn = btn('↑ Import Scan', 'secondary');
+    importBtn.className += ' text-xs';
+    importBtn.onclick = () => showImportForm();
     const addHostBtn = btn('+ Add Host', 'secondary');
     addHostBtn.className += ' text-xs';
     addHostBtn.onclick = () => showHostForm(null);
+    hostBtns.appendChild(importBtn);
+    hostBtns.appendChild(addHostBtn);
     hostsHeader.appendChild(hostsTitle);
-    hostsHeader.appendChild(addHostBtn);
+    hostsHeader.appendChild(hostBtns);
     hostCol.appendChild(hostsHeader);
 
     if (data.hosts.length === 0) {
@@ -244,6 +253,196 @@ export async function renderEngagement(engagementId) {
 
     cols.appendChild(noteCol);
     container.appendChild(cols);
+
+    // ── Imports section ───────────────────────────────────
+    if (imports.length > 0) {
+      const importsSection = document.createElement('div');
+      importsSection.className = 'mt-6';
+
+      const importsHeader = document.createElement('h3');
+      importsHeader.className = 'text-sm font-semibold text-slate-700 mb-3';
+      importsHeader.textContent = `Scan Imports (${imports.length})`;
+      importsSection.appendChild(importsHeader);
+
+      const importGrid = document.createElement('div');
+      importGrid.className = 'grid grid-cols-3 gap-3';
+
+      imports.slice().sort((a, b) => b.importedAt - a.importedAt).forEach(imp => {
+        const card = document.createElement('div');
+        card.className = 'bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-start gap-3';
+
+        const typeBadge = document.createElement('span');
+        typeBadge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold flex-shrink-0 mt-0.5 ${importTypeStyle(imp.importType)}`;
+        typeBadge.textContent = imp.importType;
+
+        const info = document.createElement('div');
+        info.className = 'min-w-0';
+
+        const fname = document.createElement('p');
+        fname.className = 'text-sm text-slate-700 truncate font-medium';
+        fname.textContent = imp.fileName;
+
+        const ts = document.createElement('p');
+        ts.className = 'text-xs text-slate-400 mt-0.5';
+        ts.textContent = new Date(imp.importedAt).toLocaleString();
+
+        const summary = document.createElement('p');
+        summary.className = 'text-xs text-slate-500 mt-1';
+        summary.textContent = formatImportSummary(imp);
+
+        info.appendChild(fname);
+        info.appendChild(ts);
+        info.appendChild(summary);
+        card.appendChild(typeBadge);
+        card.appendChild(info);
+        importGrid.appendChild(card);
+      });
+
+      importsSection.appendChild(importGrid);
+      container.appendChild(importsSection);
+    }
+  }
+
+  // ── Import form ───────────────────────────────────────
+
+  function showImportForm() {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+
+    const box = document.createElement('div');
+    box.className = 'modal-box max-w-lg';
+
+    const title = document.createElement('h3');
+    title.className = 'text-lg font-bold text-slate-800 mb-1';
+    title.textContent = 'Import Scan File';
+    box.appendChild(title);
+
+    const hint = document.createElement('p');
+    hint.className = 'text-xs text-slate-400 mb-4';
+    hint.textContent = 'Supported: Nmap XML (-oX), Metasploit db_export XML. Recognized but not yet parsed: Nessus, Nuclei, SharpHound, Ghostwriter.';
+    box.appendChild(hint);
+
+    // File picker
+    const fileWrap = document.createElement('div');
+    fileWrap.className = 'mb-3';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.xml,.nessus,.jsonl,.json,.zip,.csv';
+    fileInput.className = 'block w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer';
+    fileWrap.appendChild(fileInput);
+    box.appendChild(fileWrap);
+
+    // Detection + preview area
+    const preview = document.createElement('div');
+    preview.className = 'hidden bg-slate-50 rounded-lg px-3 py-2.5 mb-4 text-sm';
+    box.appendChild(preview);
+
+    let parsedResult = null;
+    let detectedType = null;
+    let fileContent  = null;
+    let fileName     = null;
+
+    fileInput.onchange = () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      fileName = file.name;
+      const reader = new FileReader();
+      reader.onload = e => {
+        fileContent  = e.target.result;
+        detectedType = detectFileType(fileName, fileContent);
+        parsedResult = null;
+
+        preview.className = 'bg-slate-50 rounded-lg px-3 py-2.5 mb-4 text-sm';
+        preview.innerHTML = '';
+
+        const typeEl = document.createElement('p');
+        typeEl.className = 'font-medium text-slate-700 mb-1';
+
+        if (detectedType === 'unknown') {
+          typeEl.textContent = 'Unrecognized file format';
+          typeEl.className += ' text-amber-600';
+          preview.appendChild(typeEl);
+          saveBtn.disabled = true;
+          return;
+        }
+
+        typeEl.innerHTML = `Detected: <span class="font-mono">${detectedType}</span>`;
+        preview.appendChild(typeEl);
+
+        try {
+          if (detectedType === 'nmap') {
+            parsedResult = parseNmap(fileContent);
+            const openPorts = parsedResult.hosts.reduce((n, h) => n + h.ports.filter(p => p.state === 'open').length, 0);
+            addPreviewStat(preview, `${parsedResult.hostsUp} hosts up of ${parsedResult.hostsTotal} · ${openPorts} open ports`);
+          } else if (detectedType === 'metasploit') {
+            parsedResult = parseMetasploit(fileContent);
+            addPreviewStat(preview, `${parsedResult.hosts.length} hosts · ${parsedResult.services.length} services · ${parsedResult.vulns.length} vulns · ${parsedResult.credentials.length} creds`);
+          } else {
+            addPreviewStat(preview, 'Parser not yet implemented — file will be recorded but not analyzed.');
+            saveBtn.disabled = false;
+          }
+          saveBtn.disabled = false;
+        } catch (err) {
+          const errEl = document.createElement('p');
+          errEl.className = 'text-red-500 text-xs mt-1';
+          errEl.textContent = `Parse error: ${err.message}`;
+          preview.appendChild(errEl);
+          saveBtn.disabled = true;
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    const actions = document.createElement('div');
+    actions.className = 'flex gap-3';
+
+    const saveBtn = btn('Import', 'primary');
+    saveBtn.className += ' flex-1';
+    saveBtn.disabled = true;
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true;
+      try {
+        // Build summary stats
+        const summary = buildImportSummary(detectedType, parsedResult);
+
+        const imp = newImport({
+          importType: detectedType,
+          fileName,
+          parsed:  parsedResult,
+          summary,
+        });
+
+        // Auto-create/update hosts for parseable types
+        let hostDelta = { added: 0, updated: 0 };
+        if (parsedResult) {
+          hostDelta = mergeHostsFromImport(data, imp, snapshots);
+          await saveEngagementData(engagementId, data);
+        }
+
+        imports = [...imports, imp];
+        await saveImports(engagementId, imports);
+
+        const msg = parsedResult
+          ? `Imported. ${hostDelta.added} new host${hostDelta.added !== 1 ? 's' : ''}, ${hostDelta.updated} updated.`
+          : 'Import recorded.';
+        toastSuccess(msg);
+        backdrop.remove();
+        render();
+      } catch (err) {
+        toastError(err.message || 'Could not save import.');
+        saveBtn.disabled = false;
+      }
+    };
+
+    const cancelBtn = btn('Cancel', 'ghost');
+    cancelBtn.onclick = () => backdrop.remove();
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+    box.appendChild(actions);
+
+    backdrop.appendChild(box);
+    backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
+    document.body.appendChild(backdrop);
   }
 
   // ── Engagement edit form ──────────────────────────────
@@ -539,4 +738,106 @@ function ipToNum(ip) {
   const parts = (ip || '').split('.').map(Number);
   if (parts.length !== 4 || parts.some(isNaN)) return Infinity;
   return (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
+}
+
+// ── Import helpers ────────────────────────────────────────
+
+function addPreviewStat(container, text) {
+  const el = document.createElement('p');
+  el.className = 'text-xs text-slate-500 mt-0.5';
+  el.textContent = text;
+  container.appendChild(el);
+}
+
+function buildImportSummary(type, parsed) {
+  if (!parsed) return {};
+  if (type === 'nmap') {
+    const openPorts = parsed.hosts.reduce((n, h) => n + h.ports.filter(p => p.state === 'open').length, 0);
+    return { hostsUp: parsed.hostsUp, hostsTotal: parsed.hostsTotal, openPorts };
+  }
+  if (type === 'metasploit') {
+    return {
+      hostCount:  parsed.hosts.length,
+      serviceCount: parsed.services.length,
+      vulnCount:  parsed.vulns.length,
+      credCount:  parsed.credentials.length,
+      sessionCount: parsed.sessions.length,
+    };
+  }
+  return {};
+}
+
+function formatImportSummary(imp) {
+  const s = imp.summary || {};
+  if (imp.importType === 'nmap')
+    return `${s.hostsUp ?? '?'} hosts up · ${s.openPorts ?? '?'} open ports`;
+  if (imp.importType === 'metasploit')
+    return [
+      s.hostCount    && `${s.hostCount} hosts`,
+      s.serviceCount && `${s.serviceCount} services`,
+      s.vulnCount    && `${s.vulnCount} vulns`,
+      s.credCount    && `${s.credCount} creds`,
+    ].filter(Boolean).join(' · ');
+  return '';
+}
+
+function importTypeStyle(type) {
+  const styles = {
+    nmap:        'bg-blue-100 text-blue-700',
+    metasploit:  'bg-red-100 text-red-700',
+    sharphound:  'bg-purple-100 text-purple-700',
+    nuclei:      'bg-orange-100 text-orange-700',
+    nessus:      'bg-green-100 text-green-700',
+    ghostwriter: 'bg-slate-100 text-slate-600',
+    openvas:     'bg-green-100 text-green-700',
+  };
+  return styles[type] || 'bg-slate-100 text-slate-600';
+}
+
+// Auto-create or update hosts from a parsed import.
+// Mutates data.hosts in place; returns { added, updated } counts.
+function mergeHostsFromImport(data, imp, _snapshots) {
+  let added = 0, updated = 0;
+  if (!imp.parsed) return { added, updated };
+
+  const hostList = imp.importType === 'nmap'
+    ? imp.parsed.hosts.filter(h => h.ip && h.status === 'up')
+    : imp.importType === 'metasploit'
+    ? imp.parsed.hosts.filter(h => h.ip)
+    : [];
+
+  for (const scanHost of hostList) {
+    const existing = (data.hosts || []).find(h => h.ip === scanHost.ip);
+
+    // Derive best hostname from scan data
+    const hostname = imp.importType === 'nmap'
+      ? (scanHost.hostnames.find(n => n.type === 'PTR') || scanHost.hostnames[0])?.name || ''
+      : scanHost.hostname || '';
+
+    // Derive OS string
+    const os = imp.importType === 'nmap'
+      ? scanHost.os?.name || ''
+      : scanHost.os ? [scanHost.os.name, scanHost.os.flavor].filter(Boolean).join(' ') : '';
+
+    if (existing) {
+      let changed = false;
+      if (!existing.hostname && hostname) { existing.hostname = hostname; changed = true; }
+      if (!existing.os && os)             { existing.os = os;             changed = true; }
+      if (changed) updated++;
+    } else {
+      data.hosts = [...(data.hosts || []), {
+        id:        crypto.randomUUID(),
+        ip:        scanHost.ip,
+        hostname,
+        os,
+        osFamily:  'unknown',
+        status:    'observed',
+        notes:     '',
+        createdAt: Date.now(),
+      }];
+      added++;
+    }
+  }
+
+  return { added, updated };
 }
