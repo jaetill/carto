@@ -43,7 +43,7 @@ function netstatWin(ip) {
   return `Active Connections\n\n  Proto  Local Address          Foreign Address        State\n  TCP    ${ip}:445        10.10.1.5:49720        ESTABLISHED\n  TCP    ${ip}:3389       10.10.3.55:52841       ESTABLISHED\n  TCP    ${ip}:49668      13.107.42.14:443       ESTABLISHED\n  TCP    0.0.0.0:135      0.0.0.0:0              LISTENING\n  TCP    0.0.0.0:445      0.0.0.0:0              LISTENING`;
 }
 function netstatLin(ip) {
-  return `Proto Recv-Q Send-Q Local Address           Foreign Address         State\ntcp        0      0 ${ip}:ssh              10.10.3.55:54210        ESTABLISHED\ntcp        0      0 ${ip}:https            10.10.1.20:49330        ESTABLISHED\ntcp        0      0 ${ip}:8080             10.10.2.30:39421        ESTABLISHED`;
+  return `Proto Recv-Q Send-Q Local Address           Foreign Address         State\ntcp        0      0 ${ip}:22               10.10.3.55:54210        ESTABLISHED\ntcp        0      0 ${ip}:443              10.10.1.20:49330        ESTABLISHED\ntcp        0      0 ${ip}:8080             10.10.2.30:39421        ESTABLISHED`;
 }
 function pslistWin() {
   return `Name                          PID   PPID\nlsass.exe                    776    648\nsvchost.exe                  896    648\nMsMpEng.exe                 2340    648\npowershell.exe              4812   4780\ncmd.exe                     5220   4812`;

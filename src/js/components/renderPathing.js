@@ -220,10 +220,8 @@ export async function renderPathing(engagementId, container) {
     return;
   }
 
-  // Build elements — show all hosts + attack path edges only
+  // Only show hosts that appear in the attack path
   const hostIds = new Set(paths.flatMap(p => [p.source, p.target]));
-  // Also include all hosts so operator can see context
-  for (const n of topology.nodes) hostIds.add(n.id);
 
   const hostMap = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
   const elements = [];
