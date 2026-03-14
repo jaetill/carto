@@ -13,6 +13,9 @@ export async function renderEngagement(engagementId) {
   let data      = await loadEngagementData(engagementId);
   let snapshots = await loadSnapshots(engagementId);
 
+  // Subnet collapse state — null means "not yet initialized"
+  let collapsedSubnets = null;
+
   render();
 
   function render() {
@@ -106,11 +109,21 @@ export async function renderEngagement(engagementId) {
       empty.textContent = 'No hosts yet.';
       hostCol.appendChild(empty);
     } else {
+      // Group by /24 subnet
+      const grouped = groupBySubnet(data.hosts);
+      const subnetKeys = [...grouped.keys()];
+
+      // First render: auto-collapse all subnets if there are multiple
+      if (collapsedSubnets === null) {
+        collapsedSubnets = subnetKeys.length > 1 ? new Set(subnetKeys) : new Set();
+      }
+
       const table = document.createElement('table');
       table.className = 'w-full text-sm bg-white rounded-xl border border-slate-100 overflow-hidden';
 
       const thead = document.createElement('thead');
       thead.innerHTML = `<tr class="border-b border-slate-100">
+        <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide w-8"></th>
         <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">IP</th>
         <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">Hostname</th>
         <th class="text-left px-4 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide">OS</th>
@@ -120,20 +133,53 @@ export async function renderEngagement(engagementId) {
       table.appendChild(thead);
 
       const tbody = document.createElement('tbody');
-      data.hosts.forEach(host => {
-        const snapCount = snapshots.filter(s => s.hostId === host.id).length;
-        const tr = document.createElement('tr');
-        tr.className = 'border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors';
-        tr.innerHTML = `
-          <td class="px-4 py-2.5 font-mono text-xs font-semibold text-slate-700">${host.ip || '—'}</td>
-          <td class="px-4 py-2.5 text-slate-600 truncate max-w-xs">${host.hostname || '—'}</td>
-          <td class="px-4 py-2.5 text-slate-500 text-xs">${host.os || host.osFamily || '—'}</td>
-          <td class="px-4 py-2.5"><span class="badge badge-${host.status}">${host.status}</span></td>
-          <td class="px-4 py-2.5 text-right text-xs text-slate-400">${snapCount || '—'}</td>
-        `;
-        tr.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render));
-        tbody.appendChild(tr);
+
+      subnetKeys.forEach(subnet => {
+        const hosts = grouped.get(subnet);
+        const isCollapsed = collapsedSubnets.has(subnet);
+        const compromisedCount = hosts.filter(h => h.status === 'compromised').length;
+        const snapTotal = hosts.reduce((n, h) => n + snapshots.filter(s => s.hostId === h.id).length, 0);
+
+        // Subnet header row
+        if (subnetKeys.length > 1) {
+          const subnetRow = document.createElement('tr');
+          subnetRow.className = 'bg-slate-50 border-b border-slate-200 cursor-pointer select-none hover:bg-slate-100 transition-colors';
+          subnetRow.onclick = () => {
+            if (isCollapsed) collapsedSubnets.delete(subnet);
+            else collapsedSubnets.add(subnet);
+            render();
+          };
+
+          const chevron = isCollapsed ? '▶' : '▼';
+          subnetRow.innerHTML = `
+            <td class="px-3 py-2 text-slate-400 text-xs">${chevron}</td>
+            <td colspan="3" class="px-4 py-2 font-mono text-xs font-semibold text-slate-600">${subnet}.0/24</td>
+            <td class="px-4 py-2 text-xs text-slate-400">${hosts.length} host${hosts.length !== 1 ? 's' : ''}${compromisedCount ? ` · <span class="text-red-500">${compromisedCount} compromised</span>` : ''}</td>
+            <td class="px-4 py-2 text-right text-xs text-slate-400">${snapTotal || '—'}</td>
+          `;
+          tbody.appendChild(subnetRow);
+        }
+
+        // Host rows
+        if (!isCollapsed) {
+          hosts.forEach(host => {
+            const snapCount = snapshots.filter(s => s.hostId === host.id).length;
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition-colors';
+            tr.innerHTML = `
+              <td class="px-3 py-2.5"></td>
+              <td class="px-4 py-2.5 font-mono text-xs font-semibold text-slate-700">${host.ip || '—'}</td>
+              <td class="px-4 py-2.5 text-slate-600 truncate max-w-xs">${host.hostname || '—'}</td>
+              <td class="px-4 py-2.5 text-slate-500 text-xs">${host.os || host.osFamily || '—'}</td>
+              <td class="px-4 py-2.5"><span class="badge badge-${host.status}">${host.status}</span></td>
+              <td class="px-4 py-2.5 text-right text-xs text-slate-400">${snapCount || '—'}</td>
+            `;
+            tr.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render));
+            tbody.appendChild(tr);
+          });
+        }
       });
+
       table.appendChild(tbody);
       hostCol.appendChild(table);
     }
@@ -386,6 +432,7 @@ export async function renderEngagement(engagementId) {
 
   // ── Note form ─────────────────────────────────────────
 
+
   function showNoteForm() {
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
@@ -432,4 +479,25 @@ export async function renderEngagement(engagementId) {
     document.body.appendChild(backdrop);
     textarea.focus();
   }
+}
+
+// ── Helpers ───────────────────────────────────────────────
+
+function groupBySubnet(hosts) {
+  // Groups IPv4 hosts by /24 (first 3 octets). Non-IPv4 hosts go in "Other".
+  const map = new Map();
+  const sorted = [...hosts].sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
+  for (const host of sorted) {
+    const parts = (host.ip || '').split('.');
+    const key = parts.length === 4 ? parts.slice(0, 3).join('.') : 'Other';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(host);
+  }
+  return map;
+}
+
+function ipToNum(ip) {
+  const parts = (ip || '').split('.').map(Number);
+  if (parts.length !== 4 || parts.some(isNaN)) return Infinity;
+  return (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3];
 }
