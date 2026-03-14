@@ -103,8 +103,9 @@ export function parseNetstat(raw, osFamily) {
     if (!trimmed || /^(active|proto|tcp|udp)/i.test(trimmed) === false) continue;
 
     // Windows: TCP    0.0.0.0:135    0.0.0.0:0    LISTENING    1234
+    // Require ip:port form in address fields to avoid misparsing Linux Recv-Q/Send-Q columns
     const winMatch = trimmed.match(
-      /^(tcp|udp)v?[46]?\s+([\d.:*]+)\s+([\d.:*]+)\s+(\w+)(?:\s+(\d+))?/i
+      /^(tcp|udp)v?[46]?\s+([\d.*]+:[\d*]+)\s+([\d.*]+:[\d*]+)\s+(\w+)(?:\s+(\d+))?/i
     );
     if (winMatch) {
       const localAddr  = winMatch[2];
