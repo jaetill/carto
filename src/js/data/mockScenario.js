@@ -472,7 +472,7 @@ export const mockSnapshots = {
     snap('mock-s-fs01-3',  H.FS01,    'pslist',   'windows', pslistWin(),                          20),
     snap('mock-s-jen-1',   H.JENKINS, 'uname',    'linux',   uname('jenkins', '5.4.0-169-generic'), 18),
     snap('mock-s-jen-2',   H.JENKINS, 'netstat',  'linux',   netstatLin('10.10.2.30'),             18, 1),
-    snap('mock-s-jen-3',   H.JENKINS, 'pslist',   'linux',   'root 1 /sbin/init\njenkins 1842 java -jar jenkins.war\nroot 4201 sshd\njsmith 5512 bash\nroot 6001 python3 /tmp/.x', 17),
+    snap('mock-s-jen-3',   H.JENKINS, 'pslist',   'linux',   'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nroot         1  0.0  0.0  22516  1524 ?        Ss   08:00   0:00 /sbin/init\njenkins   1842  2.1  8.4 3234568 345000 ?      Sl   08:01  45:12 java -jar /usr/share/jenkins/jenkins.war\nroot      4201  0.0  0.0  72296  6428 ?        Ss   08:00   0:00 /usr/sbin/sshd -D\njsmith    5512  0.0  0.0  22232  5124 pts/0    Ss   09:15   0:00 -bash\nroot      6001  0.1  0.0  14648  5212 ?        S    10:00   0:01 python3 /tmp/.x', 17),
     snap('mock-s-jen-4',   H.JENKINS, 'netstat',  'linux',   netstatLin('10.10.2.30'),             10),
     snap('mock-s-web01-1', H.WEB01,   'uname',    'linux',   uname('web01', '5.15.0-91-generic'),  14),
     snap('mock-s-web01-2', H.WEB01,   'netstat',  'linux',   netstatLin('10.10.2.10'),             14, 1),
