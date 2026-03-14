@@ -1,6 +1,7 @@
 import { Auth } from 'aws-amplify';
 import { DEBUG_MODE } from '../config.js';
 import { mockEngagements, mockEngagementData, mockSnapshots, MOCK_ENG_ID } from './mockScenario.js';
+import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp } from './parsers.js';
 
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
@@ -72,9 +73,32 @@ export async function saveEngagementData(engagementId, data) {
 
 // ── Snapshots ─────────────────────────────────────────────
 
+function applyParsers(snap) {
+  if (snap.parsed !== null && snap.parsed !== undefined) return snap;
+  let parsed = null;
+  try {
+    if (snap.commandType === 'netstat')  parsed = parseNetstat(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'pslist')   parsed = parsePslist(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'ipconfig') parsed = parseIpconfig(snap.rawOutput, snap.osFamily);
+    if (snap.commandType === 'uname')    parsed = parseUname(snap.rawOutput);
+    if (snap.commandType === 'arp')      parsed = parseArp(snap.rawOutput);
+  } catch (e) { console.warn('[carto] Parse error:', e); }
+  return { ...snap, parsed };
+}
+
 export async function loadSnapshots(engagementId) {
-  if (mockMode) return mockSnapshots[MOCK_ENG_ID] || [];
-  return await apiGet(`/engagement/${engagementId}/snapshots`) || [];
+  if (mockMode) {
+    const snaps = (mockSnapshots[MOCK_ENG_ID] || []).map(applyParsers);
+    mockSnapshots[MOCK_ENG_ID] = snaps;
+    return snaps;
+  }
+  const raw = await apiGet(`/engagement/${engagementId}/snapshots`) || [];
+  const needsBackfill = raw.some(s => s.parsed === null || s.parsed === undefined);
+  if (!needsBackfill) return raw;
+  const enriched = raw.map(applyParsers);
+  // Save back in the background — don't block the UI
+  apiPost(`/engagement/${engagementId}/snapshots`, enriched).catch(e => console.warn('[carto] Backfill save failed:', e));
+  return enriched;
 }
 
 export async function saveSnapshots(engagementId, snapshots) {
