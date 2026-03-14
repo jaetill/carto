@@ -117,6 +117,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       { id: 'current',   label: 'Latest State' },
       { id: 'snapshots', label: `Snapshots (${hostSnaps.length})` },
       { id: 'notes',     label: `Notes (${hostNotes.length})` },
+      { id: 'graph',     label: 'Graph' },
     ].forEach(({ id, label }) => {
       const t = document.createElement('button');
       t.type = 'button';
@@ -136,6 +137,12 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       renderCurrentTab(hostSnaps);
     } else if (activeTab === 'snapshots') {
       renderSnapshotsTab(hostSnaps);
+    } else if (activeTab === 'graph') {
+      const graphContainer = document.createElement('div');
+      container.appendChild(graphContainer);
+      import('./renderHostGraph.js').then(({ renderHostGraph }) => {
+        renderHostGraph(engagementId, host, graphContainer);
+      });
     } else {
       renderNotesTab(hostNotes);
     }

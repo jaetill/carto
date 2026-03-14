@@ -44,7 +44,7 @@ function egoNetwork(topology, focalId, maxHops) {
 
 // ── Build Cytoscape elements ──────────────────────────────
 
-function buildElements(topology, focalId, maxHops, showUsers) {
+function buildElements(topology, focalId, maxHops, showAdmins, showSessions) {
   const nodeMap = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
   let visibleIds, levels, visibleEdgeKeys;
 
@@ -63,17 +63,19 @@ function buildElements(topology, focalId, maxHops, showUsers) {
 
   const elements = [];
 
-  // Subnet compound nodes — only include subnets that have visible hosts
+  // Subnet compound nodes — only in full-graph mode (conflicts with concentric in focal mode)
   const visibleSubnets = new Set();
   for (const id of visibleIds) {
     const node = nodeMap[id];
     if (node?.subnets?.[0]) visibleSubnets.add(node.subnets[0]);
   }
 
-  for (const cidr of visibleSubnets) {
-    elements.push({
-      data: { id: `subnet-${cidr}`, label: cidr, type: 'subnet' },
-    });
+  if (!focalId) {
+    for (const cidr of visibleSubnets) {
+      elements.push({
+        data: { id: `subnet-${cidr}`, label: cidr, type: 'subnet' },
+      });
+    }
   }
 
   // Host nodes
@@ -94,7 +96,7 @@ function buildElements(topology, focalId, maxHops, showUsers) {
         openPortCount: node.openPortCount || 0,
         isFocal,
         level,
-        parent:        subnet && visibleSubnets.has(subnet) ? `subnet-${subnet}` : undefined,
+        parent:        (!focalId && subnet && visibleSubnets.has(subnet)) ? `subnet-${subnet}` : undefined,
         type:          'host',
       },
     });
@@ -122,12 +124,17 @@ function buildElements(topology, focalId, maxHops, showUsers) {
     });
   }
 
-  // User nodes + edges — only in ego-network mode (focalId set)
-  if (focalId && showUsers && (topology.users?.length || topology.userEdges?.length)) {
+  // User nodes + edges — only for the focal host (not all ego-network hosts)
+  if (focalId && (showAdmins || showSessions) && (topology.users?.length || topology.userEdges?.length)) {
     const userMap = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
 
-    // Find user edges where the host is visible
-    const visibleUserEdges = (topology.userEdges || []).filter(ue => visibleIds.has(ue.hostId));
+    // Only show users connected to the focal host, filtered by relationship type
+    const visibleUserEdges = (topology.userEdges || []).filter(ue => {
+      if (ue.hostId !== focalId) return false;
+      if (ue.type === 'IS_LOCAL_ADMIN' && !showAdmins) return false;
+      if (ue.type === 'HAS_SESSION' && !showSessions) return false;
+      return true;
+    });
 
     // Collect user IDs that have at least one visible edge
     const visibleUserIds = new Set(visibleUserEdges.map(ue => ue.userId));
@@ -298,19 +305,22 @@ const stylesheet = [
 
 // ── Layout ────────────────────────────────────────────────
 
-function makeLayout(focalId, levels, nodeCount, hasUsers) {
-  if (focalId && nodeCount <= 20 && !hasUsers) {
+function makeLayout(focalId, levels) {
+  if (focalId) {
     const maxLevel = Math.max(...Object.values(levels), 1);
     return {
       name:       'concentric',
       concentric: (node) => {
         if (node.data('type') === 'subnet') return 0;
+        // User nodes go in the outermost ring, just outside the hop rings
+        if (node.data('type') === 'user') return 1;
+        // Focal host = innermost; each hop ring moves outward
         const l = levels[node.data('id')] ?? maxLevel;
-        return maxLevel - l + 1;
+        return maxLevel - l + 2;
       },
       levelWidth:  () => 1,
       padding:     40,
-      minNodeSpacing: 50,
+      minNodeSpacing: 60,
     };
   }
   return {
@@ -377,9 +387,10 @@ export async function renderTopology(engagementId, container, onHostClick) {
   }
 
   // State
-  let focalId   = null;
-  let hopCount  = 1;
-  let showUsers = true;
+  let focalId      = null;
+  let hopCount     = 1;
+  let showAdmins   = true;
+  let showSessions = true;
 
   draw();
 
@@ -435,17 +446,32 @@ export async function renderTopology(engagementId, container, onHostClick) {
       controls.appendChild(hopWrap);
     }
 
-    // Users toggle (only when focused and users exist)
-    if (focalId && (topology.users?.length || topology.userEdges?.length)) {
-      const userWrap = document.createElement('div');
-      userWrap.className = 'flex items-center gap-1';
-      const userToggle = document.createElement('button');
-      userToggle.type = 'button';
-      userToggle.textContent = showUsers ? 'Users: on' : 'Users: off';
-      userToggle.className = `text-xs px-2.5 py-1 rounded border ${showUsers ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`;
-      userToggle.onclick = () => { showUsers = !showUsers; draw(); };
-      userWrap.appendChild(userToggle);
-      controls.appendChild(userWrap);
+    // Relationship toggles (only when focused and users exist)
+    if (focalId && topology.userEdges?.some(ue => ue.hostId === focalId)) {
+      const relWrap = document.createElement('div');
+      relWrap.className = 'flex items-center gap-1';
+      const relLabel = document.createElement('span');
+      relLabel.className = 'text-xs text-slate-500 font-medium mr-1';
+      relLabel.textContent = 'Show:';
+      relWrap.appendChild(relLabel);
+
+      for (const [label, key, activeClass] of [
+        ['Admins',   'admins',   'bg-amber-600 text-white border-amber-600'],
+        ['Sessions', 'sessions', 'bg-cyan-600 text-white border-cyan-600'],
+      ]) {
+        const active = key === 'admins' ? showAdmins : showSessions;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = label;
+        b.className = `text-xs px-2.5 py-1 rounded border ${active ? activeClass : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`;
+        b.onclick = () => {
+          if (key === 'admins') showAdmins = !showAdmins;
+          else showSessions = !showSessions;
+          draw();
+        };
+        relWrap.appendChild(b);
+      }
+      controls.appendChild(relWrap);
     }
 
     // Legend
@@ -481,15 +507,13 @@ export async function renderTopology(engagementId, container, onHostClick) {
       ? egoNetwork(topology, focalId, hopCount)
       : { levels: {} };
 
-    const elements = buildElements(topology, focalId, hopCount, showUsers);
-    const nodeCount = elements.filter(e => !e.data.source).length;
+    const elements = buildElements(topology, focalId, hopCount, showAdmins, showSessions);
 
-    const hasUsers = showUsers && elements.some(e => e.data.type === 'user');
     const cy = cytoscape({
       container: canvas,
       elements,
       style:   stylesheet,
-      layout:  makeLayout(focalId, levels, nodeCount, hasUsers),
+      layout:  makeLayout(focalId, levels),
       minZoom: 0.15,
       maxZoom: 5,
     });
