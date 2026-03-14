@@ -104,7 +104,7 @@ const stylesheet = [
 
 // ── Main export ───────────────────────────────────────────
 
-export async function renderHostGraph(engagementId, host, container) {
+export async function renderHostGraph(engagementId, host, container, onHostNavigate) {
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading graph…</p>';
 
   let topology;
@@ -189,6 +189,11 @@ export async function renderHostGraph(engagementId, host, container) {
 
   const rightPanel = document.createElement('div');
   rightPanel.className = 'w-64 flex-shrink-0 flex flex-col gap-2 overflow-y-auto';
+
+  // Info card — shown on node tap, hidden by default
+  const infoCard = document.createElement('div');
+  infoCard.className = 'hidden rounded-lg border border-slate-200 bg-white p-3 flex-shrink-0';
+  rightPanel.appendChild(infoCard);
 
   wrap.appendChild(graphDiv);
   wrap.appendChild(rightPanel);
@@ -281,6 +286,51 @@ export async function renderHostGraph(engagementId, host, container) {
     cy.nodes().first().position({ x: graphDiv.offsetWidth / 2 || 300, y: 240 });
     cy.zoom(1.2);
     cy.center();
+  });
+
+  // ── Node tap → info card ──────────────────────────────────
+
+  function showInfoCard(d) {
+    infoCard.innerHTML = '';
+    infoCard.classList.remove('hidden');
+
+    if (d.type === 'host') {
+      const isFocal = d.id === host.id;
+      const hostData = isFocal ? host : (nodeMap[d.id] || {});
+      const status = hostData.status || d.status || 'unknown';
+      const statusColor = status === 'compromised' ? 'bg-red-100 text-red-700' :
+                          status === 'observed'    ? 'bg-emerald-100 text-emerald-700' :
+                                                     'bg-slate-100 text-slate-500';
+      infoCard.innerHTML = `
+        <div class="flex items-start justify-between gap-2 mb-2">
+          <span class="text-sm font-semibold font-mono text-slate-800 break-all">${hostData.ip || d.label || '—'}</span>
+          <span class="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${statusColor}">${status}</span>
+        </div>
+        ${hostData.hostname && hostData.hostname !== hostData.ip ? `<p class="text-xs text-slate-500 mb-1">${hostData.hostname}</p>` : ''}
+        ${hostData.os ? `<p class="text-xs text-slate-400">${hostData.os}</p>` : ''}
+      `;
+      if (!isFocal && onHostNavigate) {
+        const navBtn = document.createElement('button');
+        navBtn.type = 'button';
+        navBtn.className = 'mt-2 w-full text-xs text-indigo-600 hover:text-indigo-800 text-left font-medium';
+        navBtn.textContent = 'Go to host detail →';
+        navBtn.onclick = () => onHostNavigate(d.id);
+        infoCard.appendChild(navBtn);
+      }
+    } else if (d.type === 'user') {
+      infoCard.innerHTML = `
+        <p class="text-sm font-semibold text-slate-800 break-all">${d.label}</p>
+        ${d.domain ? `<p class="text-xs text-slate-400 mt-0.5">${d.domain}</p>` : ''}
+        ${d.isAdmin ? '<p class="text-xs text-violet-600 font-medium mt-1">Local Admin</p>' : '<p class="text-xs text-slate-400 mt-1">Session user</p>'}
+      `;
+    }
+  }
+
+  cy.on('tap', 'node', (e) => showInfoCard(e.target.data()));
+  cy.on('tap', (e) => { if (e.target === cy) { infoCard.classList.add('hidden'); infoCard.innerHTML = ''; } });
+  cy.on('dbltap', 'node[type="host"]', (e) => {
+    const id = e.target.data('id');
+    if (id !== host.id && onHostNavigate) onHostNavigate(id);
   });
 
   // Empty-state hint overlay
