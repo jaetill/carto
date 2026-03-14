@@ -1330,17 +1330,18 @@ export async function parseSharpHound(arrayBuffer) {
   const zip = await JSZip.loadAsync(arrayBuffer);
 
   const result = {
-    collectedAt: null,
-    domain:      null,
-    version:     null,
-    users:       [],
-    computers:   [],
-    groups:      [],
-    domains:     [],
-    gpos:        [],
-    aces:        [],
-    cas:         [],
-    ous:         [],
+    collectedAt:   null,
+    domain:        null,
+    version:       null,
+    users:         [],
+    computers:     [],
+    groups:        [],
+    domains:       [],
+    gpos:          [],
+    aces:          [],
+    cas:           [],
+    ous:           [],
+    certTemplates: [],
   };
 
   const fileNames = Object.keys(zip.files);
@@ -1378,15 +1379,22 @@ export async function parseSharpHound(arrayBuffer) {
       for (const u of dataArr) {
         const props = u.Properties || {};
         const memberOf = (u.MemberOf || []).map(m => m.ObjectIdentifier || m).filter(Boolean);
+        const allowedToDelegate = (u.AllowedToDelegate || []).map(d => d.ObjectIdentifier || d).filter(Boolean);
         result.users.push({
-          objectId:   u.ObjectIdentifier || null,
-          name:       props.name || null,
-          domain:     props.domain || null,
-          enabled:    props.enabled ?? null,
-          lastLogon:  props.lastlogon ?? null,
-          pwdLastSet: props.pwdlastset ?? null,
-          hasSPN:     props.hasspn ?? null,
-          adminCount: props.admincount ?? null,
+          objectId:               u.ObjectIdentifier || null,
+          name:                   props.name || null,
+          domain:                 props.domain || null,
+          enabled:                props.enabled ?? null,
+          lastLogon:              props.lastlogon ?? null,
+          pwdLastSet:             props.pwdlastset ?? null,
+          hasSPN:                 props.hasspn ?? null,
+          adminCount:             props.admincount ?? null,
+          dontReqPreauth:         props.dontreqpreauth ?? null,
+          pwdNeverExpires:        props.pwdneverexpires ?? null,
+          unconstrainedDelegation: props.unconstraineddelegation ?? null,
+          trustedToAuth:          props.trustedtoauth ?? null,
+          sensitive:              props.sensitive ?? null,
+          allowedToDelegate,
           memberOf,
         });
         // Collect ACEs
@@ -1406,17 +1414,31 @@ export async function parseSharpHound(arrayBuffer) {
         const props = c.Properties || {};
         const localAdmins = ((c.LocalAdmins || {}).Results || [])
           .map(a => a.ObjectIdentifier || a).filter(Boolean);
-        const sessions = ((c.Sessions || {}).Results || [])
-          .map(s => ({ userId: s.UserSID || s.ObjectIdentifier || null, isAdmin: s.IsAdmin ?? null }));
+        // Merge all session sources; tag privileged/registry sessions
+        const sessions = [
+          ...((c.Sessions || {}).Results || []).map(s => ({ userId: s.UserSID || s.ObjectIdentifier || null, isAdmin: s.IsAdmin ?? null, source: 'session' })),
+          ...((c.PrivilegedSessions || {}).Results || []).map(s => ({ userId: s.UserSID || s.ObjectIdentifier || null, isAdmin: true, source: 'privileged' })),
+          ...((c.RegistrySessions || {}).Results || []).map(s => ({ userId: s.UserSID || s.ObjectIdentifier || null, isAdmin: s.IsAdmin ?? null, source: 'registry' })),
+        ];
+        // Deduplicate by userId (keep first occurrence which prioritises privileged)
+        const seenUsers = new Set();
+        const dedupedSessions = sessions.filter(s => {
+          if (!s.userId || seenUsers.has(s.userId)) return false;
+          seenUsers.add(s.userId);
+          return true;
+        });
         result.computers.push({
           objectId:                c.ObjectIdentifier || null,
           name:                    props.name || null,
           domain:                  props.domain || null,
           enabled:                 props.enabled ?? null,
           os:                      props.operatingsystem || null,
+          isDC:                    props.isdc ?? null,
+          hasLAPS:                 props.haslaps ?? null,
           unconstrainedDelegation: props.unconstraineddelegation ?? null,
+          trustedToAuth:           props.trustedtoauth ?? null,
           localAdmins,
-          sessions,
+          sessions: dedupedSessions,
         });
         for (const ace of (c.Aces || [])) {
           result.aces.push({
@@ -1502,7 +1524,7 @@ export async function parseSharpHound(arrayBuffer) {
           });
         }
       }
-    } else if (type === 'cas') {
+    } else if (type === 'cas' || type === 'enterprisecas') {
       for (const ca of dataArr) {
         const props = ca.Properties || {};
         const certTemplates = props.certtemplatelist || ca.CertTemplates || [];
@@ -1541,6 +1563,42 @@ export async function parseSharpHound(arrayBuffer) {
             rightName:     ace.RightName || null,
             objectSid:     ou.ObjectIdentifier || null,
             objectType:    'OU',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'certtemplates') {
+      for (const t of dataArr) {
+        const props = t.Properties || {};
+        const enrolleesSuppliesSubject = props.enrolleesuppliessubject ?? false;
+        const authenticationEnabled    = props.authenticationenabled ?? false;
+        const requiresManagerApproval  = props.requiresmanagerapproval ?? true;
+        // ESC1: enrollee can supply a SAN, template authenticates, no manager approval required
+        const esc1 = enrolleesSuppliesSubject && authenticationEnabled && !requiresManagerApproval;
+        result.certTemplates.push({
+          objectId:                t.ObjectIdentifier || null,
+          name:                    props.name || null,
+          displayName:             props.displayname || null,
+          domain:                  props.domain || null,
+          validityPeriod:          props.validityperiod || null,
+          renewalPeriod:           props.renewalperiod || null,
+          schemaVersion:           props.schemaversion ?? null,
+          requiresManagerApproval,
+          enrolleesSuppliesSubject,
+          authenticationEnabled,
+          subjectAltRequireUpn:    props.subjectaltrequireupn ?? null,
+          subjectAltRequireDns:    props.subjectaltrequiredns ?? null,
+          noSecurityExtension:     props.nosecurityextension ?? null,
+          ekus:                    props.ekus || [],
+          esc1,
+        });
+        for (const ace of (t.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     t.ObjectIdentifier || null,
+            objectType:    'CertTemplate',
             isInherited:   ace.IsInherited ?? null,
           });
         }

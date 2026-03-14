@@ -432,11 +432,12 @@ function renderSharpHound(container, importObj, onBack) {
 
   // Stats row
   buildStatsRow(container, [
-    { label: 'Computers', value: (parsed.computers || []).length },
-    { label: 'Users',     value: (parsed.users     || []).length },
-    { label: 'Groups',    value: (parsed.groups     || []).length },
-    { label: 'Domains',   value: (parsed.domains    || []).length },
-    { label: 'CAs',       value: (parsed.cas        || []).length },
+    { label: 'Computers',      value: (parsed.computers     || []).length },
+    { label: 'Users',          value: (parsed.users         || []).length },
+    { label: 'Groups',         value: (parsed.groups        || []).length },
+    { label: 'Domains',        value: (parsed.domains       || []).length },
+    { label: 'CAs',            value: (parsed.cas           || []).length },
+    { label: 'Cert Templates', value: (parsed.certTemplates || []).length },
   ]);
 
   // Inner tab bar + content wrapper
@@ -450,12 +451,13 @@ function renderSharpHound(container, importObj, onBack) {
     tabBar.className = 'flex items-center gap-1 mb-4 border-b border-slate-200';
 
     const innerTabs = [
-      { id: 'computers', label: 'Computers' },
-      { id: 'users',     label: 'Users' },
-      { id: 'groups',    label: 'Groups' },
-      { id: 'domains',   label: 'Domains' },
-      { id: 'ous',       label: 'OUs' },
-      { id: 'cas',       label: 'CAs' },
+      { id: 'computers',      label: 'Computers' },
+      { id: 'users',          label: 'Users' },
+      { id: 'groups',         label: 'Groups' },
+      { id: 'domains',        label: 'Domains' },
+      { id: 'ous',            label: 'OUs' },
+      { id: 'cas',            label: 'CAs' },
+      { id: 'cert-templates', label: 'Cert Templates' },
     ];
 
     innerTabs.forEach(({ id, label }) => {
@@ -479,13 +481,15 @@ function renderSharpHound(container, importObj, onBack) {
     if (activeInnerTab === 'computers') {
       const computers = parsed.computers || [];
       tableWrap.appendChild(buildTable(
-        ['Name', 'OS', 'Domain', 'Unconstrained Delegation'],
+        ['Name', 'OS', 'DC', 'LAPS', 'Unconstrained', 'Constrained'],
         computers,
         c => [
           monoCell(c.name || '—'),
           textCell(c.os || '—'),
-          textCell(c.domain || '—'),
+          shBoolCell(c.isDC, 'DC', 'bg-blue-100 text-blue-700'),
+          shBoolCell(c.hasLAPS, 'Yes', 'bg-green-100 text-green-700'),
           shBoolCell(c.unconstrainedDelegation, 'YES', 'bg-red-100 text-red-700'),
+          shBoolCell(c.trustedToAuth, 'Yes', 'bg-orange-100 text-orange-700'),
         ],
         'No computers collected.'
       ));
@@ -494,14 +498,15 @@ function renderSharpHound(container, importObj, onBack) {
     if (activeInnerTab === 'users') {
       const users = parsed.users || [];
       tableWrap.appendChild(buildTable(
-        ['Name', 'Domain', 'Enabled', 'Has SPN', 'Admin Count'],
+        ['Name', 'Enabled', 'Has SPN', 'AS-REP', 'Pwd Never Expires', 'Admin'],
         users,
         u => [
           monoCell(u.name || '—'),
-          textCell(u.domain || '—'),
           shBoolCell(u.enabled),
-          shBoolCell(u.hasSPN),
-          textCell(u.adminCount != null ? String(u.adminCount) : '—'),
+          shBoolCell(u.hasSPN, 'Yes', 'bg-orange-100 text-orange-700'),
+          shBoolCell(u.dontReqPreauth, 'YES', 'bg-red-100 text-red-700'),
+          shBoolCell(u.pwdNeverExpires, 'YES', 'bg-yellow-100 text-yellow-700'),
+          shBoolCell(u.adminCount, 'Yes', 'bg-red-100 text-red-700'),
         ],
         'No users collected.'
       ));
@@ -558,6 +563,25 @@ function renderSharpHound(container, importObj, onBack) {
           textCell(String((ca.certTemplates || []).length)),
         ],
         'No CAs collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'cert-templates') {
+      const templates = parsed.certTemplates || [];
+      // Sort: ESC1 first, then by name
+      const sorted = [...templates].sort((a, b) => (b.esc1 ? 1 : 0) - (a.esc1 ? 1 : 0) || (a.name || '').localeCompare(b.name || ''));
+      tableWrap.appendChild(buildTable(
+        ['Template Name', 'Validity', 'Auth Enabled', 'Enrollee Supplies SAN', 'Mgr Approval', 'ESC1'],
+        sorted,
+        t => [
+          (() => { const td = monoCell(t.displayName || t.name || '—'); if (t.esc1) td.className += ' font-semibold'; return td; })(),
+          textCell(t.validityPeriod || '—'),
+          shBoolCell(t.authenticationEnabled, 'Yes', 'bg-orange-100 text-orange-700'),
+          shBoolCell(t.enrolleesSuppliesSubject, 'YES', 'bg-red-100 text-red-700'),
+          shBoolCell(t.requiresManagerApproval, 'Required', 'bg-green-100 text-green-700'),
+          shBoolCell(t.esc1, 'ESC1', 'bg-red-600 text-white'),
+        ],
+        'No certificate templates collected.'
       ));
     }
 
