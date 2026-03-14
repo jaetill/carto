@@ -41,7 +41,19 @@ export function detectCommand(raw) {
   return 'unknown';
 }
 
+// ── Helpers ───────────────────────────────────────────────
+
+function extractPort(addr) {
+  const m = addr.match(/:(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function nullIfEmpty(val) {
+  return (val === '' || val === undefined) ? null : val;
+}
+
 // ── Netstat ───────────────────────────────────────────────
+// Schema: { connections: [{ proto, localAddr, localPort, remoteAddr, remotePort, state, pid }] }
 
 export function parseNetstat(raw, osFamily) {
   const connections = [];
@@ -56,12 +68,16 @@ export function parseNetstat(raw, osFamily) {
       /^(tcp|udp)v?[46]?\s+([\d.:*]+)\s+([\d.:*]+)\s+(\w+)(?:\s+(\d+))?/i
     );
     if (winMatch) {
+      const localAddr  = winMatch[2];
+      const remoteAddr = winMatch[3];
       connections.push({
         proto:      winMatch[1].toUpperCase(),
-        localAddr:  winMatch[2],
-        remoteAddr: winMatch[3],
+        localAddr,
+        localPort:  extractPort(localAddr),
+        remoteAddr,
+        remotePort: extractPort(remoteAddr),
         state:      winMatch[4].toUpperCase(),
-        pid:        winMatch[5] || '',
+        pid:        nullIfEmpty(winMatch[5]),
       });
       continue;
     }
@@ -71,12 +87,17 @@ export function parseNetstat(raw, osFamily) {
       /^(tcp|udp)6?\s+\d+\s+\d+\s+([\d.:*]+)\s+([\d.:*]+)\s+(\w+)(?:\s+(-|\d+\/\S+))?/i
     );
     if (linMatch) {
+      const localAddr  = linMatch[2];
+      const remoteAddr = linMatch[3];
+      const pidRaw     = linMatch[5];
       connections.push({
         proto:      linMatch[1].toUpperCase(),
-        localAddr:  linMatch[2],
-        remoteAddr: linMatch[3],
+        localAddr,
+        localPort:  extractPort(localAddr),
+        remoteAddr,
+        remotePort: extractPort(remoteAddr),
         state:      linMatch[4].toUpperCase(),
-        pid:        linMatch[5] || '',
+        pid:        (pidRaw && pidRaw !== '-') ? pidRaw.split('/')[0] : null,
       });
     }
   }
@@ -85,6 +106,7 @@ export function parseNetstat(raw, osFamily) {
 }
 
 // ── Process list ─────────────────────────────────────────
+// Schema: { processes: [{ name, pid, ppid, user, cmd }] }
 
 export function parsePslist(raw, osFamily) {
   const processes = [];
@@ -95,25 +117,55 @@ export function parsePslist(raw, osFamily) {
     for (const line of lines) {
       const match = line.match(/^(.+?)\s{2,}(\d+)\s{2,}(\S+)\s{2,}(\d+)\s{2,}([\d,]+ K)/i);
       if (match) {
-        processes.push({ name: match[1].trim(), pid: match[2], memUsage: match[5] });
+        processes.push({
+          name: match[1].trim(),
+          pid:  match[2],
+          ppid: null,
+          user: null,
+          cmd:  null,
+        });
       }
     }
     return { processes };
   }
 
-  // Linux ps (ps aux or ps -ef)
-  // Skip header line
+  // Simple "name pid ppid" format (e.g. Volatility pslist, custom output)
+  if (/^\S+\s+\d+\s+\d+$/m.test(raw) && !/USER|%CPU/i.test(raw)) {
+    for (const line of lines) {
+      const m = line.match(/^(\S+)\s+(\d+)\s+(\d+)$/);
+      if (m) {
+        processes.push({ name: m[1], pid: m[2], ppid: m[3], user: null, cmd: null });
+      }
+    }
+    if (processes.length) return { processes };
+  }
+
+  // Linux ps -ef: UID PID PPID C STIME TTY TIME CMD
+  if (/uid\s+pid\s+ppid/i.test(raw) || (lines[0] && /^\S+\s+\d+\s+\d+\s+\d+/.test(lines[1] || ''))) {
+    let headerSkipped = false;
+    for (const line of lines) {
+      if (!headerSkipped) { headerSkipped = true; continue; }
+      const parts = line.split(/\s+/);
+      if (parts.length < 8) continue;
+      const user = parts[0], pid = parts[1], ppid = parts[2];
+      const cmd  = parts.slice(7).join(' ');
+      if (/^\d+$/.test(pid)) {
+        processes.push({ name: cmd.split('/').pop().split(' ')[0], pid, ppid, user, cmd: nullIfEmpty(cmd) });
+      }
+    }
+    if (processes.length) return { processes };
+  }
+
+  // Linux ps aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
   let headerSkipped = false;
   for (const line of lines) {
     if (!headerSkipped) { headerSkipped = true; continue; }
     const parts = line.split(/\s+/);
-    if (parts.length < 8) continue;
-    // ps aux: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
-    // ps -ef: UID PID PPID C STIME TTY TIME CMD
-    const pid  = parts[1];
-    const cmd  = parts.slice(10).join(' ') || parts.slice(7).join(' ');
-    if (pid && /^\d+$/.test(pid)) {
-      processes.push({ name: cmd.split('/').pop().split(' ')[0], pid, cmd });
+    if (parts.length < 11) continue;
+    const user = parts[0], pid = parts[1];
+    const cmd  = parts.slice(10).join(' ');
+    if (/^\d+$/.test(pid)) {
+      processes.push({ name: cmd.split('/').pop().split(' ')[0], pid, ppid: null, user, cmd: nullIfEmpty(cmd) });
     }
   }
 
@@ -121,12 +173,27 @@ export function parsePslist(raw, osFamily) {
 }
 
 // ── ipconfig / ifconfig ───────────────────────────────────
+// Schema: { interfaces: [{ name, addresses: [{ ip, mask, gateway, broadcast, family }] }] }
 
 export function parseIpconfig(raw, osFamily) {
   const interfaces = [];
 
+  // Simple "Host Name / IPv4 Address / Subnet Mask / Default Gateway" format
+  if (/host name/i.test(raw) && /ipv4 address/i.test(raw) && !/ethernet adapter/i.test(raw)) {
+    const ip  = raw.match(/ipv4 address[^:]*:\s*([\d.]+)/i);
+    const mask = raw.match(/subnet mask[^:]*:\s*([\d.]+)/i);
+    const gw   = raw.match(/default gateway[^:]*:\s*([\d.]+)/i);
+    if (ip) {
+      interfaces.push({
+        name: 'Ethernet',
+        addresses: [{ ip: ip[1], mask: mask?.[1] ?? null, gateway: gw?.[1] ?? null, broadcast: null, family: 'IPv4' }],
+      });
+    }
+    return { interfaces };
+  }
+
   if (/windows ip configuration/i.test(raw) || /ethernet adapter/i.test(raw)) {
-    // Windows ipconfig
+    // Windows ipconfig /all
     const blocks = raw.split(/\n\n+/);
     for (const block of blocks) {
       const nameMatch = block.match(/^(.+?adapter.+?):/im);
@@ -135,9 +202,9 @@ export function parseIpconfig(raw, osFamily) {
       const ipv4  = block.match(/ipv4 address[^:]*:\s*([\d.]+)/i);
       const mask  = block.match(/subnet mask[^:]*:\s*([\d.]+)/i);
       const gw    = block.match(/default gateway[^:]*:\s*([\d.]+)/i);
-      if (ipv4) iface.addresses.push({ ip: ipv4[1], mask: mask?.[1], gateway: gw?.[1], family: 'IPv4' });
+      if (ipv4) iface.addresses.push({ ip: ipv4[1], mask: mask?.[1] ?? null, gateway: gw?.[1] ?? null, broadcast: null, family: 'IPv4' });
       const ipv6 = block.match(/ipv6 address[^:]*:\s*([\da-f:]+)/i);
-      if (ipv6) iface.addresses.push({ ip: ipv6[1], family: 'IPv6' });
+      if (ipv6) iface.addresses.push({ ip: ipv6[1], mask: null, gateway: null, broadcast: null, family: 'IPv6' });
       if (iface.addresses.length) interfaces.push(iface);
     }
   } else {
@@ -147,11 +214,11 @@ export function parseIpconfig(raw, osFamily) {
       const nameMatch = block.match(/^(\S+)/);
       if (!nameMatch) continue;
       const iface = { name: nameMatch[1], addresses: [] };
-      const ipv4  = block.match(/inet\s+([\d.]+).*?netmask\s+([\d.]+)/i);
-      const gw    = block.match(/broadcast\s+([\d.]+)/i);
-      if (ipv4) iface.addresses.push({ ip: ipv4[1], mask: ipv4[2], broadcast: gw?.[1], family: 'IPv4' });
-      const ipv6  = block.match(/inet6\s+([\da-f:]+)/i);
-      if (ipv6) iface.addresses.push({ ip: ipv6[1], family: 'IPv6' });
+      const ipv4      = block.match(/inet\s+([\d.]+).*?netmask\s+([\d.]+)/i);
+      const broadcast = block.match(/broadcast\s+([\d.]+)/i);
+      if (ipv4) iface.addresses.push({ ip: ipv4[1], mask: ipv4[2], gateway: null, broadcast: broadcast?.[1] ?? null, family: 'IPv4' });
+      const ipv6 = block.match(/inet6\s+([\da-f:]+)/i);
+      if (ipv6) iface.addresses.push({ ip: ipv6[1], mask: null, gateway: null, broadcast: null, family: 'IPv6' });
       if (iface.addresses.length) interfaces.push(iface);
     }
   }
@@ -160,20 +227,22 @@ export function parseIpconfig(raw, osFamily) {
 }
 
 // ── uname ─────────────────────────────────────────────────
+// Schema: { raw, os, node, kernel, arch }
 
 export function parseUname(raw) {
   const line = raw.trim().split('\n')[0];
   const parts = line.split(/\s+/);
   return {
-    raw: line,
-    os:     parts[0] || '',
-    node:   parts[1] || '',
-    kernel: parts[2] || '',
-    arch:   parts[parts.length - 1] || '',
+    raw:    line,
+    os:     nullIfEmpty(parts[0]),
+    node:   nullIfEmpty(parts[1]),
+    kernel: nullIfEmpty(parts[2]),
+    arch:   nullIfEmpty(parts[parts.length - 1]),
   };
 }
 
 // ── ARP ───────────────────────────────────────────────────
+// Schema: { entries: [{ ip, mac, type, iface }] }
 
 export function parseArp(raw) {
   const entries = [];
@@ -182,17 +251,17 @@ export function parseArp(raw) {
   if (/internet address/i.test(raw)) {
     for (const line of raw.split('\n')) {
       const match = line.trim().match(/([\d.]+)\s+([0-9a-f-]+)\s+(\w+)/i);
-      if (match) entries.push({ ip: match[1], mac: match[2].replace(/-/g, ':'), type: match[3] });
+      if (match) entries.push({ ip: match[1], mac: match[2].replace(/-/g, ':'), type: match[3], iface: null });
     }
   } else {
     // Linux: host (ip) at mac [ether] on iface
     for (const line of raw.split('\n')) {
-      const match1 = line.match(/\(([\d.]+)\)\s+at\s+([0-9a-f:]+)/i);
-      if (match1) { entries.push({ ip: match1[1], mac: match1[2] }); continue; }
-      // arp -n table format
+      const match1 = line.match(/\(([\d.]+)\)\s+at\s+([0-9a-f:]+)(?:.*\bon\s+(\S+))?/i);
+      if (match1) { entries.push({ ip: match1[1], mac: match1[2], type: null, iface: match1[3] ?? null }); continue; }
+      // arp -n table format: ADDRESS HW_TYPE HW_ADDR FLAGS IFACE
       const match2 = line.trim().match(/^([\d.]+)\s+\S+\s+([0-9a-f:]+)\s+\S+\s+(\S+)/i);
       if (match2 && match2[2] !== '00:00:00:00:00:00') {
-        entries.push({ ip: match2[1], mac: match2[2], iface: match2[3] });
+        entries.push({ ip: match2[1], mac: match2[2], type: null, iface: match2[3] });
       }
     }
   }
