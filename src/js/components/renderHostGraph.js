@@ -104,7 +104,7 @@ const stylesheet = [
 
 // ── Main export ───────────────────────────────────────────
 
-export async function renderHostGraph(engagementId, host, container, onHostNavigate) {
+export async function renderHostGraph(engagementId, host, container, hostSnaps, onHostNavigate) {
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading graph…</p>';
 
   let topology;
@@ -173,6 +173,55 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
   sections[2].items = Object.values(
     Object.fromEntries(sections[2].items.map(i => [i.nodeId, i]))
   );
+
+  // ── Snapshot-derived sections (list only — no graph nodes) ────────────────
+
+  // Open Ports: from most recent netstat snap
+  const netstatSnap = (hostSnaps || []).find(s => s.commandType === 'netstat');
+  const listeningPorts = (netstatSnap?.parsed?.connections || [])
+    .filter(c => c.state === 'LISTENING' || c.state === 'LISTEN')
+    .map(c => ({
+      label:    `${c.localPort || c.localAddr}${c.proto ? '/' + c.proto.toLowerCase() : ''}`,
+      localAddr: c.localAddr,
+      port:     c.localPort,
+      proto:    c.proto,
+    }));
+  // Deduplicate by port/proto
+  const seenPorts = new Set();
+  const uniquePorts = listeningPorts.filter(p => {
+    const k = `${p.port}/${p.proto}`;
+    if (seenPorts.has(k)) return false;
+    seenPorts.add(k);
+    return true;
+  }).sort((a, b) => (a.port || 0) - (b.port || 0));
+
+  // Shares: from most recent netshare snap
+  const netshareSnap = (hostSnaps || []).find(s => s.commandType === 'netshare');
+  const shares = (netshareSnap?.parsed?.shares || []);
+
+  const listSections = [
+    {
+      id:    'ports',
+      label: 'Open Ports',
+      color: 'indigo',
+      items: uniquePorts,
+      renderItem: (item) => `
+        <span class="font-mono text-slate-700">${item.port || '?'}</span>
+        <span class="text-slate-400 ml-1">${item.proto?.toLowerCase() || ''}</span>
+      `,
+    },
+    {
+      id:    'shares',
+      label: 'Shares',
+      color: 'slate',
+      items: shares,
+      renderItem: (item) => `
+        <span class="font-mono text-slate-700">${item.name}</span>
+        ${item.path ? `<span class="text-slate-400 ml-1 text-xs truncate">${item.path}</span>` : ''}
+        ${item.isAdmin ? '<span class="ml-auto text-orange-500 text-xs">admin</span>' : ''}
+      `,
+    },
+  ];
 
   // ── State ─────────────────────────────────────────────────
   const openSections = new Set();
@@ -437,5 +486,63 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
     accDiv.appendChild(header);
     accDiv.appendChild(body);
     rightPanel.appendChild(accDiv);
+  }
+
+  // ── List-only sections (ports, shares) ────────────────────
+
+  if (listSections.some(s => s.items.length > 0)) {
+    const listHeader = document.createElement('div');
+    listHeader.className = 'pt-3 pb-1 border-t border-slate-200 mt-1';
+    listHeader.innerHTML = '<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Host Info</span>';
+    rightPanel.appendChild(listHeader);
+
+    const countBadgeFor = { indigo: 'bg-indigo-100 text-indigo-700', slate: 'bg-slate-100 text-slate-500' };
+    const activeClassFor = { indigo: 'bg-indigo-50 border-indigo-200', slate: 'bg-slate-50 border-slate-300' };
+
+    for (const section of listSections) {
+      const count = section.items.length;
+      const accDiv = document.createElement('div');
+      accDiv.className = 'border border-slate-200 rounded-lg overflow-hidden bg-white';
+
+      const header = document.createElement('button');
+      header.type = 'button';
+      header.className = `w-full flex items-center justify-between px-3 py-2.5 text-left ${count === 0 ? 'opacity-50 cursor-default' : 'hover:bg-slate-50 cursor-pointer'}`;
+      header.disabled = count === 0;
+      header.innerHTML = `
+        <span class="text-sm font-medium text-slate-700">${section.label}</span>
+        <span class="flex items-center gap-2">
+          <span class="text-xs px-1.5 py-0.5 rounded-full font-medium ${countBadgeFor[section.color] || 'bg-slate-100 text-slate-500'}">${count}</span>
+          <span class="text-slate-400 text-xs transition-transform duration-150 acc-arrow">▶</span>
+        </span>
+      `;
+
+      const body = document.createElement('div');
+      body.className = 'hidden border-t border-slate-100 divide-y divide-slate-50 max-h-52 overflow-y-auto';
+
+      for (const item of section.items) {
+        const row = document.createElement('div');
+        row.className = 'px-3 py-1.5 text-xs flex items-center gap-1';
+        row.innerHTML = section.renderItem(item);
+        body.appendChild(row);
+      }
+
+      header.onclick = () => {
+        if (count === 0) return;
+        const isOpen = !body.classList.contains('hidden');
+        if (isOpen) {
+          body.classList.add('hidden');
+          accDiv.className = 'border border-slate-200 rounded-lg overflow-hidden bg-white';
+          header.querySelector('.acc-arrow').style.transform = '';
+        } else {
+          body.classList.remove('hidden');
+          accDiv.className = `border rounded-lg overflow-hidden ${activeClassFor[section.color] || 'bg-slate-50 border-slate-300'}`;
+          header.querySelector('.acc-arrow').style.transform = 'rotate(90deg)';
+        }
+      };
+
+      accDiv.appendChild(header);
+      accDiv.appendChild(body);
+      rightPanel.appendChild(accDiv);
+    }
   }
 }

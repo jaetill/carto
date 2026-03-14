@@ -928,6 +928,106 @@ export function parseMetasploit(xmlString) {
   return { hosts, services, vulns, credentials, sessions };
 }
 
+// ── Nessus XML parser ──────────────────────────────────────
+// Input:  .nessus export (Nessus v2 XML)
+// See schema comment near line 659
+
+export function parseNessus(xmlString) {
+  const doc = new DOMParser().parseFromString(xmlString, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Invalid Nessus XML');
+  if (!doc.querySelector('NessusClientData_v2'))
+    throw new Error('Not a valid Nessus v2 XML file — missing <NessusClientData_v2>');
+
+  const policyNameEl = doc.querySelector('Policy > policyName');
+  const policyName = policyNameEl?.textContent?.trim() || null;
+
+  const hosts = [...doc.querySelectorAll('ReportHost')].map(hostEl => {
+    const getTag = name => hostEl.querySelector(`tag[name="${name}"]`)?.textContent?.trim() || null;
+
+    const ip        = getTag('host-ip') || hostEl.getAttribute('name') || null;
+    const hostname  = getTag('host-fqdn') || null;
+    const os        = getTag('operating-system') || null;
+    const mac       = getTag('mac-address') || null;
+    const scanStart = getTag('HOST_START') ? new Date(getTag('HOST_START')).getTime() || null : null;
+    const scanEnd   = getTag('HOST_END')   ? new Date(getTag('HOST_END')).getTime()   || null : null;
+
+    const findings = [...hostEl.querySelectorAll('ReportItem')]
+      .map(item => {
+        const getText = tag => item.querySelector(tag)?.textContent?.trim() || null;
+        const cveIds = [...item.querySelectorAll('cve')].map(c => c.textContent.trim());
+        const severity = parseInt(item.getAttribute('severity') || '0');
+        const exploitAvailable = getText('exploit_available') === 'true';
+        const cvssScore  = getText('cvss_base_score')  ? parseFloat(getText('cvss_base_score'))  : null;
+        const cvss3Score = getText('cvss3_base_score') ? parseFloat(getText('cvss3_base_score')) : null;
+
+        return {
+          port:             parseInt(item.getAttribute('port') || '0'),
+          protocol:         item.getAttribute('protocol') || null,
+          severity,
+          pluginId:         item.getAttribute('pluginID') || null,
+          pluginName:       item.getAttribute('pluginName') || null,
+          synopsis:         getText('synopsis'),
+          description:      getText('description'),
+          solution:         getText('solution'),
+          cvssScore,
+          cvss3Score,
+          cveIds,
+          exploitAvailable,
+          pluginOutput:     getText('plugin_output'),
+        };
+      })
+      // Filter out info (severity=0) findings with no CVEs — too noisy
+      .filter(f => !(f.severity === 0 && f.cveIds.length === 0));
+
+    return { ip, hostname, os, mac, scanStart, scanEnd, findings };
+  });
+
+  return { policyName, hosts };
+}
+
+// ── Nuclei JSONL parser ────────────────────────────────────
+// Input:  nuclei -j / -json-export output (JSONL — one object per line)
+// See schema comment near line 638
+
+export function parseNuciei(jsonlString) {
+  const findings = jsonlString
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0)
+    .map(line => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(obj => obj !== null && obj['template-id'] && obj['info'])
+    .map(obj => {
+      const info = obj['info'] || {};
+      const classification = info['classification'] || {};
+      const cveIds = (classification['cve-id'] || []).map(s => String(s));
+      const cvssScore = classification['cvss-score'] != null ? parseFloat(classification['cvss-score']) : null;
+      const tags = Array.isArray(info['tags']) ? info['tags'] : [];
+
+      return {
+        templateId:       obj['template-id'] || null,
+        name:             info['name'] || null,
+        severity:         (info['severity'] || 'info').toLowerCase(),
+        tags,
+        cveIds,
+        cvssScore: isNaN(cvssScore) ? null : cvssScore,
+        host:             obj['host'] || null,
+        ip:               obj['ip'] || null,
+        matchedAt:        obj['matched-at'] || null,
+        timestamp:        obj['timestamp'] || null,
+        extractedResults: obj['extracted-results'] || [],
+        curlCommand:      obj['curl-command'] || null,
+      };
+    });
+
+  return { findings };
+}
+
 // ── Diff helpers ──────────────────────────────────────────
 
 export function diffSnapshots(prev, curr) {

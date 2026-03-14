@@ -1,5 +1,5 @@
 import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, loadImports, saveImports, newHost, newNote, newImport, saveEngagements } from '../data/index.js';
-import { detectFileType, parseNmap, parseMetasploit } from '../data/parsers.js';
+import { detectFileType, parseNmap, parseMetasploit, parseNessus, parseNuciei } from '../data/parsers.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
@@ -452,6 +452,18 @@ export async function renderEngagement(engagementId) {
           } else if (detectedType === 'metasploit') {
             parsedResult = parseMetasploit(fileContent);
             addPreviewStat(preview, `${parsedResult.hosts.length} hosts · ${parsedResult.services.length} services · ${parsedResult.vulns.length} vulns · ${parsedResult.credentials.length} creds`);
+          } else if (detectedType === 'nessus') {
+            parsedResult = parseNessus(fileContent);
+            const allFindings = parsedResult.hosts.flatMap(h => h.findings);
+            const critCount = allFindings.filter(f => f.severity === 4).length;
+            const highCount = allFindings.filter(f => f.severity === 3).length;
+            addPreviewStat(preview, `${parsedResult.hosts.length} hosts · ${allFindings.length} findings · ${critCount} critical · ${highCount} high`);
+          } else if (detectedType === 'nuclei') {
+            parsedResult = parseNuciei(fileContent);
+            const findings = parsedResult.findings;
+            const critCount = findings.filter(f => f.severity === 'critical').length;
+            const highCount = findings.filter(f => f.severity === 'high').length;
+            addPreviewStat(preview, `${findings.length} findings · ${critCount} critical · ${highCount} high`);
           } else {
             addPreviewStat(preview, 'Parser not yet implemented — file will be recorded but not analyzed.');
             saveBtn.disabled = false;

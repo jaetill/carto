@@ -8,6 +8,10 @@ export function renderImport(engagementId, importObj, onBack) {
     renderNmap(container, importObj, onBack);
   } else if (importObj.importType === 'metasploit') {
     renderMetasploit(container, importObj, onBack);
+  } else if (importObj.importType === 'nessus') {
+    renderNessus(container, importObj, onBack);
+  } else if (importObj.importType === 'nuclei') {
+    renderNuciei(container, importObj, onBack);
   } else {
     renderGeneric(container, importObj, onBack);
   }
@@ -262,6 +266,142 @@ function renderMetasploit(container, importObj, onBack) {
   }
 
   renderInnerTabs();
+}
+
+// ── Nessus detail view ────────────────────────────────────
+
+function renderNessus(container, importObj, onBack) {
+  const parsed = importObj.parsed || {};
+  const hosts  = parsed.hosts || [];
+
+  // Header
+  const header = buildHeader(container, importObj, onBack);
+
+  if (parsed.policyName) {
+    const policyRow = document.createElement('p');
+    policyRow.className = 'text-xs text-slate-500 font-mono mb-4';
+    policyRow.textContent = `Policy: ${parsed.policyName}`;
+    header.appendChild(policyRow);
+  }
+
+  // Flatten findings across all hosts
+  const allFindings = hosts.flatMap(h =>
+    (h.findings || []).map(f => ({ ...f, hostIp: h.ip, hostName: h.hostname }))
+  );
+
+  const critCount       = allFindings.filter(f => f.severity === 4).length;
+  const highCount       = allFindings.filter(f => f.severity === 3).length;
+  const exploitCount    = allFindings.filter(f => f.exploitAvailable).length;
+
+  buildStatsRow(container, [
+    { label: 'Hosts',       value: hosts.length },
+    { label: 'Findings',    value: allFindings.length },
+    { label: 'Critical',    value: critCount },
+    { label: 'High',        value: highCount },
+    { label: 'Exploitable', value: exploitCount },
+  ]);
+
+  // Sort findings by severity descending (critical first)
+  const sortedFindings = [...allFindings].sort((a, b) => b.severity - a.severity);
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'bg-white rounded-xl border border-slate-200 overflow-hidden';
+
+  tableWrap.appendChild(buildTable(
+    ['Host', 'Severity', 'Plugin / Finding Name', 'Port', 'CVEs', 'CVSS'],
+    sortedFindings,
+    finding => [
+      monoCell(finding.hostIp || finding.hostName || '—'),
+      nessusSeverityCell(finding.severity),
+      textCell(finding.pluginName || '—'),
+      monoCell(finding.port != null ? String(finding.port) : '—'),
+      refsCell(finding.cveIds || []),
+      textCell(finding.cvss3Score != null ? String(finding.cvss3Score) : (finding.cvssScore != null ? String(finding.cvssScore) : '—')),
+    ],
+    'No findings recorded.'
+  ));
+
+  container.appendChild(tableWrap);
+}
+
+function nessusSeverityCell(severity) {
+  const td = document.createElement('td');
+  td.className = 'px-4 py-2.5';
+  const labels = { 4: 'Critical', 3: 'High', 2: 'Medium', 1: 'Low', 0: 'Info' };
+  const colors = {
+    4: 'bg-red-100 text-red-700 border border-red-200',
+    3: 'bg-orange-100 text-orange-700 border border-orange-200',
+    2: 'bg-yellow-100 text-yellow-700 border border-yellow-200',
+    1: 'bg-blue-100 text-blue-700 border border-blue-200',
+    0: 'bg-slate-100 text-slate-500',
+  };
+  const badge = document.createElement('span');
+  badge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[severity] || colors[0]}`;
+  badge.textContent = labels[severity] ?? String(severity);
+  td.appendChild(badge);
+  return td;
+}
+
+// ── Nuclei detail view ────────────────────────────────────
+
+function renderNuciei(container, importObj, onBack) {
+  const parsed   = importObj.parsed || {};
+  const findings = parsed.findings || [];
+
+  // Header
+  buildHeader(container, importObj, onBack);
+
+  const critCount   = findings.filter(f => f.severity === 'critical').length;
+  const highCount   = findings.filter(f => f.severity === 'high').length;
+  const medCount    = findings.filter(f => f.severity === 'medium').length;
+
+  buildStatsRow(container, [
+    { label: 'Findings', value: findings.length },
+    { label: 'Critical', value: critCount },
+    { label: 'High',     value: highCount },
+    { label: 'Medium',   value: medCount },
+  ]);
+
+  // Sort by severity descending
+  const severityOrder = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+  const sortedFindings = [...findings].sort(
+    (a, b) => (severityOrder[b.severity] ?? 0) - (severityOrder[a.severity] ?? 0)
+  );
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'bg-white rounded-xl border border-slate-200 overflow-hidden';
+
+  tableWrap.appendChild(buildTable(
+    ['Host / IP', 'Severity', 'Finding Name', 'Matched At', 'CVEs'],
+    sortedFindings,
+    finding => [
+      monoCell(finding.host || finding.ip || '—'),
+      nucleiSeverityCell(finding.severity),
+      textCell(finding.name || finding.templateId || '—'),
+      textCell(finding.matchedAt || '—', true),
+      refsCell(finding.cveIds || []),
+    ],
+    'No findings recorded.'
+  ));
+
+  container.appendChild(tableWrap);
+}
+
+function nucleiSeverityCell(severity) {
+  const td = document.createElement('td');
+  td.className = 'px-4 py-2.5';
+  const colors = {
+    critical: 'bg-red-100 text-red-700 border border-red-200',
+    high:     'bg-orange-100 text-orange-700 border border-orange-200',
+    medium:   'bg-yellow-100 text-yellow-700 border border-yellow-200',
+    low:      'bg-blue-100 text-blue-700 border border-blue-200',
+    info:     'bg-slate-100 text-slate-500',
+  };
+  const badge = document.createElement('span');
+  badge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[severity] || colors.info}`;
+  badge.textContent = severity ? severity.charAt(0).toUpperCase() + severity.slice(1) : '—';
+  td.appendChild(badge);
+  return td;
 }
 
 // ── Generic fallback ──────────────────────────────────────

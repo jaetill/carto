@@ -141,7 +141,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       const graphContainer = document.createElement('div');
       container.appendChild(graphContainer);
       import('./renderHostGraph.js').then(({ renderHostGraph }) => {
-        renderHostGraph(engagementId, host, graphContainer, (targetHostId) => {
+        renderHostGraph(engagementId, host, graphContainer, hostSnaps, (targetHostId) => {
           renderHost(engagementId, targetHostId, data, snapshots, onBack);
         });
       });
