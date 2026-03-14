@@ -343,7 +343,8 @@ export async function renderEngagement(engagementId) {
 
       imports.slice().sort((a, b) => b.importedAt - a.importedAt).forEach(imp => {
         const card = document.createElement('div');
-        card.className = 'bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-start gap-3';
+        card.className = 'bg-white rounded-xl border border-slate-200 px-4 py-3 flex items-start gap-3 cursor-pointer hover:border-indigo-300 hover:shadow-sm transition-all';
+        card.onclick = () => import('./renderImport.js').then(m => m.renderImport(engagementId, imp, render));
 
         const typeBadge = document.createElement('span');
         typeBadge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold flex-shrink-0 mt-0.5 ${importTypeStyle(imp.importType)}`;

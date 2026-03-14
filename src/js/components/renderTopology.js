@@ -44,7 +44,7 @@ function egoNetwork(topology, focalId, maxHops) {
 
 // ── Build Cytoscape elements ──────────────────────────────
 
-function buildElements(topology, focalId, maxHops) {
+function buildElements(topology, focalId, maxHops, showUsers) {
   const nodeMap = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
   let visibleIds, levels, visibleEdgeKeys;
 
@@ -123,7 +123,7 @@ function buildElements(topology, focalId, maxHops) {
   }
 
   // User nodes + edges — only in ego-network mode (focalId set)
-  if (focalId && (topology.users?.length || topology.userEdges?.length)) {
+  if (focalId && showUsers && (topology.users?.length || topology.userEdges?.length)) {
     const userMap = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
 
     // Find user edges where the host is visible
@@ -298,8 +298,8 @@ const stylesheet = [
 
 // ── Layout ────────────────────────────────────────────────
 
-function makeLayout(focalId, levels, nodeCount) {
-  if (focalId && nodeCount <= 20) {
+function makeLayout(focalId, levels, nodeCount, hasUsers) {
+  if (focalId && nodeCount <= 20 && !hasUsers) {
     const maxLevel = Math.max(...Object.values(levels), 1);
     return {
       name:       'concentric',
@@ -317,10 +317,10 @@ function makeLayout(focalId, levels, nodeCount) {
     name:           'cose',
     animate:        true,
     animationDuration: 500,
-    nodeRepulsion:  12000,
-    idealEdgeLength: 130,
-    gravity:        0.4,
-    padding:        32,
+    nodeRepulsion:  14000,
+    idealEdgeLength: 100,
+    gravity:        0.5,
+    padding:        40,
   };
 }
 
@@ -377,8 +377,9 @@ export async function renderTopology(engagementId, container, onHostClick) {
   }
 
   // State
-  let focalId  = null;
-  let hopCount = 1;
+  let focalId   = null;
+  let hopCount  = 1;
+  let showUsers = true;
 
   draw();
 
@@ -434,6 +435,19 @@ export async function renderTopology(engagementId, container, onHostClick) {
       controls.appendChild(hopWrap);
     }
 
+    // Users toggle (only when focused and users exist)
+    if (focalId && (topology.users?.length || topology.userEdges?.length)) {
+      const userWrap = document.createElement('div');
+      userWrap.className = 'flex items-center gap-1';
+      const userToggle = document.createElement('button');
+      userToggle.type = 'button';
+      userToggle.textContent = showUsers ? 'Users: on' : 'Users: off';
+      userToggle.className = `text-xs px-2.5 py-1 rounded border ${showUsers ? 'bg-violet-600 text-white border-violet-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`;
+      userToggle.onclick = () => { showUsers = !showUsers; draw(); };
+      userWrap.appendChild(userToggle);
+      controls.appendChild(userWrap);
+    }
+
     // Legend
     const legend = document.createElement('div');
     legend.className = 'flex items-center gap-3 ml-auto text-xs text-slate-500';
@@ -467,14 +481,15 @@ export async function renderTopology(engagementId, container, onHostClick) {
       ? egoNetwork(topology, focalId, hopCount)
       : { levels: {} };
 
-    const elements = buildElements(topology, focalId, hopCount);
+    const elements = buildElements(topology, focalId, hopCount, showUsers);
     const nodeCount = elements.filter(e => !e.data.source).length;
 
+    const hasUsers = showUsers && elements.some(e => e.data.type === 'user');
     const cy = cytoscape({
       container: canvas,
       elements,
       style:   stylesheet,
-      layout:  makeLayout(focalId, levels, nodeCount),
+      layout:  makeLayout(focalId, levels, nodeCount, hasUsers),
       minZoom: 0.15,
       maxZoom: 5,
     });
