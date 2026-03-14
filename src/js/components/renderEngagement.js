@@ -146,7 +146,7 @@ export async function renderEngagement(engagementId) {
         m.renderTopology(
           engagementId,
           topologyContainer,
-          (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render)),
+          (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports)),
         )
       );
       return;
@@ -261,7 +261,7 @@ export async function renderEngagement(engagementId) {
               <td class="px-4 py-2.5"><span class="badge badge-${host.status}">${host.status}</span></td>
               <td class="px-4 py-2.5 text-right text-xs text-slate-400">${snapCount || '—'}</td>
             `;
-            tr.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render));
+            tr.onclick = () => import('./renderHost.js').then(m => m.renderHost(engagementId, host.id, data, snapshots, render, imports));
             tbody.appendChild(tr);
           });
         }

@@ -430,6 +430,16 @@ function renderSharpHound(container, importObj, onBack) {
     header.appendChild(dateRow);
   }
 
+  // Build SID → name lookup for use across all tabs
+  const sidToName = {};
+  for (const u of parsed.users     || []) if (u.objectId && u.name) sidToName[u.objectId] = u.name;
+  for (const g of parsed.groups    || []) if (g.objectId && g.name) sidToName[g.objectId] = g.name;
+  for (const c of parsed.computers || []) if (c.objectId && c.name) sidToName[c.objectId] = c.name;
+  for (const d of parsed.domains   || []) if (d.objectId && d.name) sidToName[d.objectId] = d.name;
+
+  const notableRights = new Set(['DCSync','GenericAll','GenericWrite','WriteDACL','WriteOwner','AllExtendedRights','Owns','ForceChangePassword','AddMember','ReadLAPSPassword','ReadGMSAPassword','AddKeyCredentialLink','AllowedToAct']);
+  const notableAces = (parsed.aces || []).filter(a => notableRights.has(a.rightName) && !a.isInherited);
+
   // Stats row
   buildStatsRow(container, [
     { label: 'Computers',      value: (parsed.computers     || []).length },
@@ -438,6 +448,7 @@ function renderSharpHound(container, importObj, onBack) {
     { label: 'Domains',        value: (parsed.domains       || []).length },
     { label: 'CAs',            value: (parsed.cas           || []).length },
     { label: 'Cert Templates', value: (parsed.certTemplates || []).length },
+    { label: 'Notable ACEs',   value: notableAces.length },
   ]);
 
   // Inner tab bar + content wrapper
@@ -458,6 +469,8 @@ function renderSharpHound(container, importObj, onBack) {
       { id: 'ous',            label: 'OUs' },
       { id: 'cas',            label: 'CAs' },
       { id: 'cert-templates', label: 'Cert Templates' },
+      { id: 'gpos',           label: 'GPOs' },
+      { id: 'aces',           label: `ACEs (${notableAces.length})` },
     ];
 
     innerTabs.forEach(({ id, label }) => {
@@ -481,7 +494,7 @@ function renderSharpHound(container, importObj, onBack) {
     if (activeInnerTab === 'computers') {
       const computers = parsed.computers || [];
       tableWrap.appendChild(buildTable(
-        ['Name', 'OS', 'DC', 'LAPS', 'Unconstrained', 'Constrained'],
+        ['Name', 'OS', 'DC', 'LAPS', 'Unconstrained', 'Constrained', 'Sessions', 'Local Admins'],
         computers,
         c => [
           monoCell(c.name || '—'),
@@ -490,6 +503,8 @@ function renderSharpHound(container, importObj, onBack) {
           shBoolCell(c.hasLAPS, 'Yes', 'bg-green-100 text-green-700'),
           shBoolCell(c.unconstrainedDelegation, 'YES', 'bg-red-100 text-red-700'),
           shBoolCell(c.trustedToAuth, 'Yes', 'bg-orange-100 text-orange-700'),
+          textCell(String((c.sessions || []).length)),
+          textCell(String((c.localAdmins || []).length)),
         ],
         'No computers collected.'
       ));
@@ -498,7 +513,7 @@ function renderSharpHound(container, importObj, onBack) {
     if (activeInnerTab === 'users') {
       const users = parsed.users || [];
       tableWrap.appendChild(buildTable(
-        ['Name', 'Enabled', 'Has SPN', 'AS-REP', 'Pwd Never Expires', 'Admin'],
+        ['Name', 'Enabled', 'Has SPN', 'AS-REP', 'Pwd Never Expires', 'Constrained Deleg.', 'Admin', 'Groups'],
         users,
         u => [
           monoCell(u.name || '—'),
@@ -506,7 +521,9 @@ function renderSharpHound(container, importObj, onBack) {
           shBoolCell(u.hasSPN, 'Yes', 'bg-orange-100 text-orange-700'),
           shBoolCell(u.dontReqPreauth, 'YES', 'bg-red-100 text-red-700'),
           shBoolCell(u.pwdNeverExpires, 'YES', 'bg-yellow-100 text-yellow-700'),
+          shBoolCell(u.trustedToAuth, 'Yes', 'bg-orange-100 text-orange-700'),
           shBoolCell(u.adminCount, 'Yes', 'bg-red-100 text-red-700'),
+          textCell(String((u.memberOf || []).length)),
         ],
         'No users collected.'
       ));
@@ -568,7 +585,6 @@ function renderSharpHound(container, importObj, onBack) {
 
     if (activeInnerTab === 'cert-templates') {
       const templates = parsed.certTemplates || [];
-      // Sort: ESC1 first, then by name
       const sorted = [...templates].sort((a, b) => (b.esc1 ? 1 : 0) - (a.esc1 ? 1 : 0) || (a.name || '').localeCompare(b.name || ''));
       tableWrap.appendChild(buildTable(
         ['Template Name', 'Validity', 'Auth Enabled', 'Enrollee Supplies SAN', 'Mgr Approval', 'ESC1'],
@@ -582,6 +598,48 @@ function renderSharpHound(container, importObj, onBack) {
           shBoolCell(t.esc1, 'ESC1', 'bg-red-600 text-white'),
         ],
         'No certificate templates collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'gpos') {
+      const gpos = parsed.gpos || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'Domain', 'GUID'],
+        gpos,
+        g => [
+          monoCell(g.name || '—'),
+          textCell(g.domain || '—'),
+          (() => { const td = document.createElement('td'); td.className = 'px-4 py-2.5 text-slate-400 text-xs font-mono'; td.textContent = g.guid || g.objectId || '—'; return td; })(),
+        ],
+        'No GPOs collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'aces') {
+      // Sort: high-impact rights first
+      const highImpact = new Set(['DCSync','GenericAll','AllExtendedRights','WriteDACL','WriteOwner']);
+      const sorted = [...notableAces].sort((a, b) => {
+        const aHigh = highImpact.has(a.rightName) ? 0 : 1;
+        const bHigh = highImpact.has(b.rightName) ? 0 : 1;
+        return aHigh - bHigh || (a.rightName || '').localeCompare(b.rightName || '');
+      });
+      tableWrap.appendChild(buildTable(
+        ['Principal', 'Type', 'Right', 'Object', 'Object Type'],
+        sorted,
+        a => {
+          const rightClass = highImpact.has(a.rightName) ? 'text-red-600 font-semibold' : 'text-orange-600';
+          const td = document.createElement('td');
+          td.className = `px-4 py-2.5 text-sm ${rightClass}`;
+          td.textContent = a.rightName || '—';
+          return [
+            monoCell(sidToName[a.principalSid] || a.principalSid || '—'),
+            textCell(a.principalType || '—'),
+            td,
+            monoCell(sidToName[a.objectSid] || a.objectSid || '—'),
+            textCell(a.objectType || '—'),
+          ];
+        },
+        'No notable ACEs found.'
       ));
     }
 

@@ -8,7 +8,7 @@ import { detectOS, detectCommand,
          parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS,
          diffSnapshots } from '../data/parsers.js';
 
-export function renderHost(engagementId, hostId, data, snapshots, onBack) {
+export function renderHost(engagementId, hostId, data, snapshots, onBack, imports = []) {
   const container = document.getElementById('app-content');
   const host = data.hosts.find(h => h.id === hostId);
   if (!host) { onBack(); return; }
@@ -115,10 +115,11 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     tabBar.className = 'flex gap-1 border-b border-slate-200 mb-4';
 
     [
-      { id: 'current',   label: 'Latest State' },
-      { id: 'snapshots', label: `Snapshots (${hostSnaps.length})` },
-      { id: 'notes',     label: `Notes (${hostNotes.length})` },
-      { id: 'graph',     label: 'Graph' },
+      { id: 'current',     label: 'Latest State' },
+      { id: 'snapshots',   label: `Snapshots (${hostSnaps.length})` },
+      { id: 'notes',       label: `Notes (${hostNotes.length})` },
+      { id: 'graph',       label: 'Graph' },
+      { id: 'bloodhound',  label: 'BloodHound' },
     ].forEach(({ id, label }) => {
       const t = document.createElement('button');
       t.type = 'button';
@@ -143,9 +144,11 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       container.appendChild(graphContainer);
       import('./renderHostGraph.js').then(({ renderHostGraph }) => {
         renderHostGraph(engagementId, host, graphContainer, hostSnaps, (targetHostId) => {
-          renderHost(engagementId, targetHostId, data, snapshots, onBack);
+          renderHost(engagementId, targetHostId, data, snapshots, onBack, imports);
         });
       });
+    } else if (activeTab === 'bloodhound') {
+      renderBHTab();
     } else {
       renderNotesTab(hostNotes);
     }
@@ -606,6 +609,154 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
         render();
       })
       .catch(e => toastError(e.message || 'Simulation failed.'));
+  }
+
+  // ── BloodHound tab ─────────────────────────────────────
+
+  function renderBHTab() {
+    // Find the most recent SharpHound import with a matching computer entry
+    const shImports = (imports || [])
+      .filter(i => i.importType === 'sharphound' && i.parsed)
+      .sort((a, b) => b.importedAt - a.importedAt);
+
+    const hostname = (host.hostname || '').toLowerCase().split('.')[0];
+
+    let bhComputer = null;
+    let bhParsed   = null;
+    for (const imp of shImports) {
+      const match = (imp.parsed.computers || []).find(c => {
+        const bhShort = (c.name || '').toLowerCase().split('.')[0];
+        return bhShort && bhShort === hostname;
+      });
+      if (match) { bhComputer = match; bhParsed = imp.parsed; break; }
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'space-y-4';
+
+    if (!bhComputer) {
+      const empty = document.createElement('div');
+      empty.className = 'bg-white rounded-xl border border-slate-200 px-6 py-10 text-center';
+      empty.innerHTML = `<p class="text-slate-400 text-sm">No matching BloodHound computer found for hostname <span class="font-mono">${host.hostname || host.ip}</span>.</p><p class="text-slate-300 text-xs mt-1">Import a SharpHound ZIP from the Overview tab to populate this section.</p>`;
+      wrap.appendChild(empty);
+      container.appendChild(wrap);
+      return;
+    }
+
+    // Build SID → name lookup from all BH object types
+    const sidToName = {};
+    for (const u of bhParsed.users     || []) if (u.objectId && u.name)     sidToName[u.objectId] = u.name;
+    for (const g of bhParsed.groups    || []) if (g.objectId && g.name)     sidToName[g.objectId] = g.name;
+    for (const c of bhParsed.computers || []) if (c.objectId && c.name)     sidToName[c.objectId] = c.name;
+    for (const d of bhParsed.domains   || []) if (d.objectId && d.name)     sidToName[d.objectId] = d.name;
+
+    function resolveSid(sid) {
+      return sidToName[sid] || sid;
+    }
+
+    // ── Properties card ──
+    const propsCard = bhCard('Computer Properties');
+    const props = [
+      { label: 'Domain Controller', value: bhComputer.isDC    ? 'Yes' : 'No', highlight: bhComputer.isDC    ? 'text-blue-600 font-semibold'   : '' },
+      { label: 'LAPS Deployed',     value: bhComputer.hasLAPS ? 'Yes' : 'No', highlight: bhComputer.hasLAPS ? 'text-green-600 font-semibold'  : 'text-red-500' },
+      { label: 'OS',                value: bhComputer.os || '—',               highlight: '' },
+      { label: 'Domain',            value: bhComputer.domain || '—',           highlight: '' },
+      { label: 'Enabled',           value: bhComputer.enabled ? 'Yes' : 'No',  highlight: '' },
+      { label: 'Unconstrained Delegation', value: bhComputer.unconstrainedDelegation ? 'YES' : 'No', highlight: bhComputer.unconstrainedDelegation ? 'text-red-600 font-semibold' : '' },
+      { label: 'Constrained Delegation',   value: bhComputer.trustedToAuth           ? 'Yes' : 'No', highlight: bhComputer.trustedToAuth           ? 'text-orange-600 font-semibold' : '' },
+    ];
+    const propGrid = document.createElement('div');
+    propGrid.className = 'grid grid-cols-2 gap-x-8 gap-y-2 text-sm';
+    props.forEach(({ label, value, highlight }) => {
+      const row = document.createElement('div');
+      row.className = 'flex justify-between border-b border-slate-50 py-1';
+      row.innerHTML = `<span class="text-slate-500">${label}</span><span class="font-mono text-right ${highlight || 'text-slate-800'}">${value}</span>`;
+      propGrid.appendChild(row);
+    });
+    propsCard.appendChild(propGrid);
+    wrap.appendChild(propsCard);
+
+    // ── Sessions card ──
+    const sessions = bhComputer.sessions || [];
+    const sessCard = bhCard(`Sessions (${sessions.length})`);
+    if (sessions.length === 0) {
+      sessCard.appendChild(bhEmpty('No sessions collected.'));
+    } else {
+      const list = document.createElement('div');
+      list.className = 'space-y-1';
+      sessions.forEach(s => {
+        const name = resolveSid(s.userId);
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between text-sm py-1 border-b border-slate-50';
+        const srcBadge = s.source === 'privileged' ? '<span class="ml-2 px-1.5 py-0.5 rounded text-xs bg-red-100 text-red-700">privileged</span>' : '';
+        row.innerHTML = `<span class="font-mono text-slate-700 truncate">${name}</span>${srcBadge}`;
+        list.appendChild(row);
+      });
+      sessCard.appendChild(list);
+    }
+    wrap.appendChild(sessCard);
+
+    // ── Local Admins card ──
+    const localAdmins = bhComputer.localAdmins || [];
+    const adminCard = bhCard(`Local Admins (${localAdmins.length})`);
+    if (localAdmins.length === 0) {
+      adminCard.appendChild(bhEmpty('No local admins collected.'));
+    } else {
+      const list = document.createElement('div');
+      list.className = 'space-y-1';
+      localAdmins.forEach(sid => {
+        const row = document.createElement('div');
+        row.className = 'text-sm font-mono text-slate-700 py-1 border-b border-slate-50 truncate';
+        row.textContent = resolveSid(sid);
+        list.appendChild(row);
+      });
+      adminCard.appendChild(list);
+    }
+    wrap.appendChild(adminCard);
+
+    // ── Notable ACEs card ──
+    const notableRights = new Set(['DCSync','GenericAll','GenericWrite','WriteDACL','WriteOwner','AllExtendedRights','Owns','ForceChangePassword','AddMember','ReadLAPSPassword','ReadGMSAPassword','AddKeyCredentialLink','AllowedToAct']);
+    const myAces = (bhParsed.aces || []).filter(a =>
+      a.objectSid === bhComputer.objectId && notableRights.has(a.rightName)
+    );
+    const aceCard = bhCard(`Notable ACEs on this host (${myAces.length})`);
+    if (myAces.length === 0) {
+      aceCard.appendChild(bhEmpty('No notable ACEs found.'));
+    } else {
+      const tbl = document.createElement('table');
+      tbl.className = 'w-full text-sm';
+      tbl.innerHTML = '<thead><tr class="text-left text-xs text-slate-400 border-b border-slate-100"><th class="py-1.5 pr-4 font-medium">Principal</th><th class="py-1.5 pr-4 font-medium">Type</th><th class="py-1.5 font-medium">Right</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+      myAces.forEach(a => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-50';
+        const rightClass = ['GenericAll','DCSync','AllExtendedRights'].includes(a.rightName) ? 'text-red-600 font-semibold' : 'text-orange-600';
+        tr.innerHTML = `<td class="py-1.5 pr-4 font-mono text-slate-700 truncate max-w-xs">${resolveSid(a.principalSid)}</td><td class="py-1.5 pr-4 text-slate-500">${a.principalType || '—'}</td><td class="py-1.5 ${rightClass}">${a.rightName}</td>`;
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody);
+      aceCard.appendChild(tbl);
+    }
+    wrap.appendChild(aceCard);
+
+    container.appendChild(wrap);
+  }
+
+  function bhCard(title) {
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-xl border border-slate-200 p-5';
+    const h = document.createElement('h3');
+    h.className = 'text-sm font-semibold text-slate-700 mb-3';
+    h.textContent = title;
+    card.appendChild(h);
+    return card;
+  }
+
+  function bhEmpty(msg) {
+    const p = document.createElement('p');
+    p.className = 'text-slate-400 text-sm italic';
+    p.textContent = msg;
+    return p;
   }
 }
 
