@@ -341,6 +341,11 @@ export async function renderHostGraph(engagementId, host, container, onHostNavig
 
   // ── Accordion panels ──────────────────────────────────────
 
+  const relHeader = document.createElement('div');
+  relHeader.className = 'pt-3 pb-1 border-t border-slate-200 mt-1';
+  relHeader.innerHTML = '<span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Relationships</span>';
+  rightPanel.appendChild(relHeader);
+
   for (const section of sections) {
     const count = section.items.length;
 
