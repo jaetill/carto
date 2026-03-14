@@ -202,6 +202,70 @@ export async function syncCredentials(engagementId, creds) {
   );
 }
 
+// ── Users ─────────────────────────────────────────────────
+// users: [{ id, engagementId, username, domain, isAdmin }]
+
+export async function syncUsers(engagementId, users) {
+  if (!users.length) return;
+  await run(
+    `UNWIND $users AS u
+     MERGE (user:User {id: u.id})
+     SET user.engagementId = $engagementId,
+         user.username     = u.username,
+         user.domain       = u.domain,
+         user.isAdmin      = u.isAdmin
+     WITH user
+     MATCH (e:Engagement {id: $engagementId})
+     MERGE (e)-[:HAS_USER]->(user)`,
+    { engagementId, users },
+  );
+}
+
+// ── Local admin links (User → IS_LOCAL_ADMIN → Host) ──────
+// links: [{ userId, hostId }]
+
+export async function syncLocalAdmins(links) {
+  if (!links.length) return;
+  await run(
+    `UNWIND $links AS l
+     MATCH (u:User {id: l.userId}), (h:Host {id: l.hostId})
+     MERGE (u)-[:IS_LOCAL_ADMIN]->(h)`,
+    { links },
+  );
+}
+
+// ── Session links (User → HAS_SESSION → Host) ─────────────
+// links: [{ userId, hostId, fromIp, timestamp }]
+
+export async function syncSessions(links) {
+  if (!links.length) return;
+  await run(
+    `UNWIND $links AS l
+     MATCH (u:User {id: l.userId}), (h:Host {id: l.hostId})
+     MERGE (u)-[r:HAS_SESSION {userId: l.userId, hostId: l.hostId}]->(h)
+     SET r.fromIp    = l.fromIp,
+         r.timestamp = l.timestamp`,
+    { links },
+  );
+}
+
+// ── Shares (Host → EXPOSES_SHARE → Share) ─────────────────
+// shares: [{ hostId, name, path, remark, isAdmin }]
+
+export async function syncShares(shares) {
+  if (!shares.length) return;
+  await run(
+    `UNWIND $shares AS s
+     MATCH (h:Host {id: s.hostId})
+     MERGE (share:Share {hostId: s.hostId, name: s.name})
+     SET share.path    = s.path,
+         share.remark  = s.remark,
+         share.isAdmin = s.isAdmin
+     MERGE (h)-[:EXPOSES_SHARE]->(share)`,
+    { shares },
+  );
+}
+
 // ── Attack Paths ──────────────────────────────────────────
 
 export async function addAttackPath(engagementId, { edgeId, fromHostId, toHostId, technique, notes, timestamp }) {
@@ -234,7 +298,7 @@ export async function removeAttackPath(edgeId) {
 // ── Query: Topology ───────────────────────────────────────
 
 export async function getTopology(engagementId) {
-  const [hostRecs, connRecs, subnetRecs] = await Promise.all([
+  const [hostRecs, connRecs, subnetRecs, userRecs, userEdgeRecs] = await Promise.all([
     run(
       `MATCH (e:Engagement {id: $engagementId})-[:HAS_HOST]->(h:Host)
        OPTIONAL MATCH (h)-[:IN_SUBNET]->(s:Subnet)
@@ -255,6 +319,19 @@ export async function getTopology(engagementId) {
     run(
       `MATCH (e:Engagement {id: $engagementId})-[:HAS_SUBNET]->(s:Subnet)
        RETURN s.cidr AS cidr`,
+      { engagementId },
+    ),
+    run(
+      `MATCH (e:Engagement {id: $engagementId})-[:HAS_USER]->(u:User)
+       RETURN u.id AS id, u.username AS username,
+              u.domain AS domain, u.isAdmin AS isAdmin`,
+      { engagementId },
+    ),
+    run(
+      `MATCH (e:Engagement {id: $engagementId})-[:HAS_HOST]->(h:Host)
+       MATCH (u:User {engagementId: $engagementId})-[r:IS_LOCAL_ADMIN|HAS_SESSION]->(h)
+       RETURN u.id AS userId, h.id AS hostId, type(r) AS relType,
+              r.fromIp AS fromIp`,
       { engagementId },
     ),
   ]);
@@ -278,6 +355,18 @@ export async function getTopology(engagementId) {
       state:    r.get('state'),
     })),
     subnets: subnetRecs.map(r => r.get('cidr')),
+    users: userRecs.map(r => ({
+      id:       r.get('id'),
+      username: r.get('username'),
+      domain:   r.get('domain'),
+      isAdmin:  r.get('isAdmin'),
+    })),
+    userEdges: userEdgeRecs.map(r => ({
+      userId:  r.get('userId'),
+      hostId:  r.get('hostId'),
+      type:    r.get('relType'),   // 'IS_LOCAL_ADMIN' | 'HAS_SESSION'
+      fromIp:  r.get('fromIp'),
+    })),
   };
 }
 

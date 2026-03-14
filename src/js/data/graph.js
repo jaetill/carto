@@ -1,6 +1,6 @@
 import { apiGet, apiPost, isMockMode } from './index.js';
 import { mockEngagementData, mockSnapshots, mockAttackPaths, MOCK_ENG_ID } from './mockScenario.js';
-import { parseNetstat } from './parsers.js';
+import { parseNetstat, parseLocalAdmins, parseQwinsta, parseLast } from './parsers.js';
 
 // ── Mock topology (derived from mock data client-side) ────
 
@@ -70,7 +70,72 @@ function buildMockTopology() {
     }
   }
 
-  return { nodes, edges, subnets: [...subnetSet] };
+  // Users and user edges from parsed mock snapshots
+  const engId      = MOCK_ENG_ID;
+  const userMap    = {};   // userId → user object
+  const userEdges  = [];
+  const edgeSeen   = new Set();
+
+  function makeUserId(username) {
+    return `user_${engId}_${(username || '').toLowerCase().replace(/[^a-z0-9_.@-]/g, '_')}`;
+  }
+  function normalizeUsername(raw) {
+    const m = raw.match(/\\(.+)$/);
+    return (m ? m[1] : raw).trim();
+  }
+  function ensureUser(username, domain, isAdmin) {
+    if (!username) return null;
+    const norm = normalizeUsername(username);
+    const id   = makeUserId(norm);
+    if (!userMap[id]) userMap[id] = { id, username: norm, domain: domain ?? null, isAdmin: !!isAdmin };
+    else if (isAdmin) userMap[id].isAdmin = true;
+    return id;
+  }
+  function addUserEdge(userId, hostId, type, fromIp = null) {
+    const key = `${userId}→${hostId}:${type}`;
+    if (edgeSeen.has(key)) return;
+    edgeSeen.add(key);
+    userEdges.push({ userId, hostId, type, fromIp });
+  }
+
+  for (const snap of snaps) {
+    const parsed = snap.parsed;
+    if (!parsed) continue;
+
+    if (snap.commandType === 'localadmins') {
+      const p = parsed.members ? parsed : parseLocalAdmins(snap.rawOutput);
+      for (const m of p.members || []) {
+        const domain = m.isDomain ? m.name.split('\\')[0] : null;
+        const uid = ensureUser(m.name, domain, true);
+        if (uid) addUserEdge(uid, snap.hostId, 'IS_LOCAL_ADMIN');
+      }
+    }
+
+    if (snap.commandType === 'sessions') {
+      const p = parsed.sessions ? parsed : parseQwinsta(snap.rawOutput);
+      for (const s of p.sessions || []) {
+        if (!s.username || s.state?.toUpperCase() !== 'ACTIVE') continue;
+        const uid = ensureUser(s.username, null, false);
+        if (uid) addUserEdge(uid, snap.hostId, 'HAS_SESSION');
+      }
+    }
+
+    if (snap.commandType === 'lastlog') {
+      const p = parsed.entries ? parsed : parseLast(snap.rawOutput);
+      for (const e of p.entries || []) {
+        if (!e.username || e.username === 'reboot') continue;
+        const uid = ensureUser(e.username, null, false);
+        if (uid) addUserEdge(uid, snap.hostId, 'HAS_SESSION', e.fromIp || null);
+      }
+    }
+
+    if (snap.commandType === 'whoami' && parsed.username) {
+      const uid = ensureUser(parsed.username, null, parsed.isAdmin);
+      if (uid) addUserEdge(uid, snap.hostId, 'HAS_SESSION');
+    }
+  }
+
+  return { nodes, edges, subnets: [...subnetSet], users: Object.values(userMap), userEdges };
 }
 
 function buildMockAttackPaths() {
@@ -89,7 +154,7 @@ function buildMockAttackPaths() {
 
 export async function loadTopology(engagementId) {
   if (isMockMode()) return buildMockTopology();
-  return await apiGet(`/engagement/${engagementId}/graph`) || { nodes: [], edges: [], subnets: [] };
+  return await apiGet(`/engagement/${engagementId}/graph`) || { nodes: [], edges: [], subnets: [], users: [], userEdges: [] };
 }
 
 // ── Attack Paths ──────────────────────────────────────────

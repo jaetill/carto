@@ -8,6 +8,10 @@ import {
   syncPorts,
   syncVulnerabilities,
   syncCredentials,
+  syncUsers,
+  syncLocalAdmins,
+  syncSessions,
+  syncShares,
 } from './graph.mjs';
 
 // ── Helpers ───────────────────────────────────────────────
@@ -160,6 +164,101 @@ function extractCredentials(imports) {
   return creds;
 }
 
+// ── User / session / share extraction ────────────────────
+
+function makeUserId(engagementId, username) {
+  return `user_${engagementId}_${(username || '').toLowerCase().replace(/[^a-z0-9_.@-]/g, '_')}`;
+}
+
+function normalizeUsername(raw) {
+  // Strip domain prefix: CORP\jsmith → jsmith
+  const m = raw.match(/\\(.+)$/);
+  return (m ? m[1] : raw).trim();
+}
+
+function extractUsers(snapshots, engagementId) {
+  const seen  = new Set();
+  const users = [];
+
+  function add(username, domain, isAdmin) {
+    if (!username) return;
+    const norm = normalizeUsername(username);
+    const id   = makeUserId(engagementId, norm);
+    if (seen.has(id)) return;
+    seen.add(id);
+    users.push({ id, username: norm, domain: domain ?? null, isAdmin: !!isAdmin });
+  }
+
+  for (const snap of snapshots) {
+    if (!snap.parsed) continue;
+    if (snap.commandType === 'netuser') {
+      if (snap.parsed.type === 'list')   snap.parsed.users.forEach(u => add(u.username, null, false));
+      if (snap.parsed.type === 'detail') add(snap.parsed.username, null, false);
+    }
+    if (snap.commandType === 'localadmins') {
+      snap.parsed.members.forEach(m => {
+        const domain = m.isDomain ? m.name.split('\\')[0] : null;
+        add(m.name, domain, true);
+      });
+    }
+    if (snap.commandType === 'sessions') {
+      snap.parsed.sessions.forEach(s => { if (s.username) add(s.username, null, false); });
+    }
+    if (snap.commandType === 'lastlog') {
+      snap.parsed.entries.forEach(e => { if (e.username && e.username !== 'reboot') add(e.username, null, false); });
+    }
+    if (snap.commandType === 'passwd') {
+      snap.parsed.users.filter(u => u.isLoginShell).forEach(u => add(u.username, null, u.uid === 0));
+    }
+    if (snap.commandType === 'whoami') {
+      if (snap.parsed.username) add(snap.parsed.username, null, snap.parsed.isAdmin);
+    }
+  }
+  return users;
+}
+
+function extractLocalAdminLinks(snapshots, engagementId) {
+  const links = [];
+  for (const snap of snapshots) {
+    if (snap.commandType !== 'localadmins' || !snap.parsed) continue;
+    for (const m of snap.parsed.members) {
+      links.push({ userId: makeUserId(engagementId, normalizeUsername(m.name)), hostId: snap.hostId });
+    }
+  }
+  return links;
+}
+
+function extractSessionLinks(snapshots, engagementId) {
+  const links = [];
+  for (const snap of snapshots) {
+    if (!snap.parsed) continue;
+    if (snap.commandType === 'sessions') {
+      for (const s of snap.parsed.sessions) {
+        if (!s.username || s.state?.toUpperCase() !== 'ACTIVE') continue;
+        links.push({ userId: makeUserId(engagementId, normalizeUsername(s.username)), hostId: snap.hostId, fromIp: null, timestamp: snap.timestamp });
+      }
+    }
+    if (snap.commandType === 'lastlog') {
+      for (const e of snap.parsed.entries) {
+        if (!e.username || e.username === 'reboot') continue;
+        links.push({ userId: makeUserId(engagementId, e.username), hostId: snap.hostId, fromIp: e.fromIp || null, timestamp: snap.timestamp });
+      }
+    }
+  }
+  return links;
+}
+
+function extractShares(snapshots) {
+  const shares = [];
+  for (const snap of snapshots) {
+    if (snap.commandType !== 'netshare' || !snap.parsed) continue;
+    for (const s of snap.parsed.shares) {
+      shares.push({ hostId: snap.hostId, name: s.name, path: s.path || '', remark: s.remark || '', isAdmin: s.isAdmin || false });
+    }
+  }
+  return shares;
+}
+
 // ── Incremental sync triggers ─────────────────────────────
 // Called inline after each save — only syncs what changed.
 
@@ -181,6 +280,18 @@ export async function afterSnapshotSave(engagementId, snapshots, hosts) {
 
   const procs = extractProcesses(snapshots);
   if (procs.length) await syncProcesses(procs);
+
+  const users = extractUsers(snapshots, engagementId);
+  if (users.length) await syncUsers(engagementId, users);
+
+  const adminLinks = extractLocalAdminLinks(snapshots, engagementId);
+  if (adminLinks.length) await syncLocalAdmins(adminLinks);
+
+  const sessionLinks = extractSessionLinks(snapshots, engagementId);
+  if (sessionLinks.length) await syncSessions(sessionLinks);
+
+  const shares = extractShares(snapshots);
+  if (shares.length) await syncShares(shares);
 }
 
 export async function afterImportSave(engagementId, imports, hosts) {
@@ -224,6 +335,18 @@ export async function syncEngagementFull(engagementId) {
 
   const procs = extractProcesses(snaps);
   if (procs.length) await syncProcesses(procs);
+
+  const users = extractUsers(snaps, engagementId);
+  if (users.length) await syncUsers(engagementId, users);
+
+  const adminLinks = extractLocalAdminLinks(snaps, engagementId);
+  if (adminLinks.length) await syncLocalAdmins(adminLinks);
+
+  const sessionLinks = extractSessionLinks(snaps, engagementId);
+  if (sessionLinks.length) await syncSessions(sessionLinks);
+
+  const shares = extractShares(snaps);
+  if (shares.length) await syncShares(shares);
 
   const hostsByIp = buildHostsByIp(hosts);
 

@@ -100,7 +100,7 @@ function buildElements(topology, focalId, maxHops) {
     });
   }
 
-  // Edges
+  // Edges (host ↔ host connections)
   const edgeSeen = new Set();
   for (const edge of topology.edges) {
     if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) continue;
@@ -120,6 +120,48 @@ function buildElements(topology, focalId, maxHops) {
         type:     'connection',
       },
     });
+  }
+
+  // User nodes + edges — only in ego-network mode (focalId set)
+  if (focalId && (topology.users?.length || topology.userEdges?.length)) {
+    const userMap = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
+
+    // Find user edges where the host is visible
+    const visibleUserEdges = (topology.userEdges || []).filter(ue => visibleIds.has(ue.hostId));
+
+    // Collect user IDs that have at least one visible edge
+    const visibleUserIds = new Set(visibleUserEdges.map(ue => ue.userId));
+
+    for (const uid of visibleUserIds) {
+      const u = userMap[uid];
+      if (!u) continue;
+      elements.push({
+        data: {
+          id:       uid,
+          label:    u.username,
+          domain:   u.domain,
+          isAdmin:  u.isAdmin,
+          type:     'user',
+        },
+      });
+    }
+
+    for (const ue of visibleUserEdges) {
+      if (!visibleUserIds.has(ue.userId)) continue;
+      const key = `${ue.userId}→${ue.hostId}:${ue.type}`;
+      if (edgeSeen.has(key)) continue;
+      edgeSeen.add(key);
+      elements.push({
+        data: {
+          id:     key,
+          source: ue.userId,
+          target: ue.hostId,
+          type:   ue.type,
+          fromIp: ue.fromIp,
+          label:  '',
+        },
+      });
+    }
   }
 
   return elements;
@@ -172,6 +214,61 @@ const stylesheet = [
       'border-color':   '#6366f1',
       'border-width':   3,
       'border-opacity': 1,
+    },
+  },
+  {
+    selector: 'node[type="user"]',
+    style: {
+      'width':            28,
+      'height':           28,
+      'background-color': (ele) => ele.data('isAdmin') ? '#7c3aed' : '#a78bfa',
+      'border-color':     '#ffffff',
+      'border-width':     1.5,
+      'label':            'data(label)',
+      'font-size':        '9px',
+      'color':            '#1e293b',
+      'text-valign':      'bottom',
+      'text-halign':      'center',
+      'text-margin-y':    4,
+      'shape':            'diamond',
+    },
+  },
+  {
+    selector: 'node[type="user"]:selected',
+    style: { 'border-color': '#6366f1', 'border-width': 2.5 },
+  },
+  {
+    selector: 'edge[type="IS_LOCAL_ADMIN"]',
+    style: {
+      'line-color':             '#f59e0b',
+      'target-arrow-color':     '#f59e0b',
+      'target-arrow-shape':     'triangle',
+      'curve-style':            'bezier',
+      'line-style':             'dashed',
+      'line-dash-pattern':      [4, 3],
+      'width':                  1.5,
+      'label':                  'admin',
+      'font-size':              '8px',
+      'color':                  '#92400e',
+      'text-rotation':          'autorotate',
+      'text-margin-y':          -5,
+    },
+  },
+  {
+    selector: 'edge[type="HAS_SESSION"]',
+    style: {
+      'line-color':             '#0891b2',
+      'target-arrow-color':     '#0891b2',
+      'target-arrow-shape':     'triangle',
+      'curve-style':            'bezier',
+      'line-style':             'dashed',
+      'line-dash-pattern':      [4, 3],
+      'width':                  1.5,
+      'label':                  'session',
+      'font-size':              '8px',
+      'color':                  '#164e63',
+      'text-rotation':          'autorotate',
+      'text-margin-y':          -5,
     },
   },
   {
@@ -244,6 +341,11 @@ function showTooltip(canvas, ele) {
       <p class="mt-1"><span class="badge badge-${d.status}">${d.status}</span></p>
       ${d.openPortCount ? `<p class="text-slate-400 mt-1">${d.openPortCount} open port${d.openPortCount !== 1 ? 's' : ''}</p>` : ''}
       <p class="text-indigo-400 mt-1 text-xs">Click to focus</p>
+    `;
+  } else if (d.type === 'user') {
+    tip.innerHTML = `
+      <p class="font-semibold">${d.domain ? `${d.domain}\\` : ''}${d.username}</p>
+      ${d.isAdmin ? '<p class="text-red-400 font-semibold text-xs mt-0.5">Local Admin</p>' : ''}
     `;
   } else if (d.type === 'connection') {
     tip.innerHTML = `
@@ -339,6 +441,7 @@ export async function renderTopology(engagementId, container, onHostClick) {
       <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-full bg-red-600"></span>Compromised</span>
       <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-600"></span>Observed</span>
       <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rounded-full bg-slate-500"></span>Unknown</span>
+      <span class="flex items-center gap-1"><span class="inline-block w-2.5 h-2.5 rotate-45 bg-violet-600"></span>User</span>
     `;
     controls.appendChild(legend);
     container.appendChild(controls);
@@ -377,8 +480,8 @@ export async function renderTopology(engagementId, container, onHostClick) {
     });
 
     // Tooltips
-    cy.on('mouseover', 'node[type="host"], edge', (e) => showTooltip(canvas, e.target));
-    cy.on('mouseout',  'node[type="host"], edge', () => canvas.querySelector('#cy-tip')?.remove());
+    cy.on('mouseover', 'node[type="host"], node[type="user"], edge', (e) => showTooltip(canvas, e.target));
+    cy.on('mouseout',  'node[type="host"], node[type="user"], edge', () => canvas.querySelector('#cy-tip')?.remove());
 
     // Click host → refocus
     cy.on('tap', 'node[type="host"]', (e) => {
@@ -396,11 +499,13 @@ export async function renderTopology(engagementId, container, onHostClick) {
     // ── Info bar ──────────────────────────────────────────
     const info = document.createElement('p');
     info.className = 'text-xs text-slate-400 mt-2';
-    const visibleEdges = elements.filter(e => e.data.source).length;
-    const visibleNodes = elements.filter(e => e.data.type === 'host').length;
+    const visibleHostNodes = elements.filter(e => e.data.type === 'host').length;
+    const visibleUserNodes = elements.filter(e => e.data.type === 'user').length;
+    const visibleEdges     = elements.filter(e => e.data.source && e.data.type === 'connection').length;
+    const userPart = visibleUserNodes ? ` · ${visibleUserNodes} user${visibleUserNodes !== 1 ? 's' : ''}` : '';
     info.innerHTML = focalId
-      ? `Showing ${visibleNodes} host${visibleNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Click focused host again to open detail`
-      : `${visibleNodes} connected host${visibleNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click any host to focus`;
+      ? `Showing ${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}${userPart} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Click focused host again to open detail`
+      : `${visibleHostNodes} connected host${visibleHostNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click any host to focus`;
     container.appendChild(info);
   }
 }
