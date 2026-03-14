@@ -1,9 +1,23 @@
 // Mock scenario: "CORP Internal Pentest" — 30-day engagement, 15 hosts
 // Used when DEBUG_MODE is enabled or "Load Mock Scenario" is triggered
 
-const ENG_ID   = 'mock-eng-0001';
-const START_TS = Date.now() - (30 * 24 * 60 * 60 * 1000);
+const ENG_ID     = 'mock-eng-0001';
+const START_TS   = Date.now() - (30 * 24 * 60 * 60 * 1000);
 const START_DATE = new Date(START_TS).toISOString().slice(0, 10);
+
+// ── Nmap port helpers ─────────────────────────────────────
+
+function port(portid, protocol, state, name, product = null, version = null) {
+  return { port: portid, protocol, state, service: { name, product, version, extrainfo: null, ostype: null } };
+}
+
+function winOS(name = 'Windows Server 2019') {
+  return { name, accuracy: 94, family: 'Windows', generation: null, type: 'general purpose' };
+}
+
+function linOS(name = 'Linux 5.X') {
+  return { name, accuracy: 89, family: 'Linux', generation: '5.X', type: 'general purpose' };
+}
 
 const H = {
   DC01:    'mock-host-dc01',
@@ -83,6 +97,263 @@ export const mockEngagementData = {
       { id: 'mock-note-10', hostId: null, text: 'Engagement day 30. Beginning report drafting. Need to verify all C2 implants removed before close-out call.', timestamp: daysAgo(0) },
     ],
   },
+};
+
+// ── Mock imports ──────────────────────────────────────────
+
+const NMAP_PARSED = {
+  scanArgs:   '-sV -O -T4 10.10.1.0/24 10.10.2.0/24 10.10.3.0/24 10.10.4.0/24',
+  scanStart:  daysAgo(28),
+  scanEnd:    daysAgo(28) + 840000,
+  hostsTotal: 254 * 4,
+  hostsUp:    15,
+  hosts: [
+    {
+      ip: '10.10.1.5', mac: '00:50:56:A1:11:01', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'DC01.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows Server 2019 Standard 17763'),
+      ports: [
+        port(53,   'tcp', 'open', 'domain',      'Microsoft DNS',    '10.0.17763'),
+        port(88,   'tcp', 'open', 'kerberos-sec','Microsoft Kerberos'),
+        port(135,  'tcp', 'open', 'msrpc',       'Microsoft RPC'),
+        port(139,  'tcp', 'open', 'netbios-ssn', 'Microsoft netbios-ssn'),
+        port(389,  'tcp', 'open', 'ldap',        'Microsoft AD LDAP'),
+        port(445,  'tcp', 'open', 'microsoft-ds','Windows Server 2019 SMB'),
+        port(636,  'tcp', 'open', 'tcpwrapped'),
+        port(3268, 'tcp', 'open', 'ldap',        'Microsoft AD GC'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [{ id: 'smb-os-discovery', output: 'OS: Windows Server 2019; Computer name: DC01; Domain: CORP.LOCAL' }],
+    },
+    {
+      ip: '10.10.1.6', mac: '00:50:56:A1:11:02', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'DC02.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows Server 2019 Standard 17763'),
+      ports: [
+        port(53,   'tcp', 'open', 'domain',       'Microsoft DNS'),
+        port(88,   'tcp', 'open', 'kerberos-sec', 'Microsoft Kerberos'),
+        port(389,  'tcp', 'open', 'ldap',         'Microsoft AD LDAP'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows Server 2019 SMB'),
+        port(3268, 'tcp', 'open', 'ldap',         'Microsoft AD GC'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.1.20', mac: '00:50:56:A1:11:03', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'FS01.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows Server 2016 Standard 14393'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(139,  'tcp', 'open', 'netbios-ssn'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows Server 2016 SMB'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [{ id: 'smb-security-mode', output: 'message_signing: disabled (DANGEROUS, but default)' }],
+    },
+    {
+      ip: '10.10.1.30', mac: '00:50:56:A1:11:04', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'APPSVR01.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows Server 2022 Standard 20348'),
+      ports: [
+        port(80,   'tcp', 'open', 'http',         'Microsoft IIS httpd', '10.0'),
+        port(443,  'tcp', 'open', 'ssl/http',     'Microsoft IIS httpd', '10.0'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+        port(8080, 'tcp', 'open', 'http',         'Apache Tomcat',       '9.0.75'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.1.40', mac: '00:50:56:A1:11:05', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'SQLDB01.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows Server 2019 Standard 17763'),
+      ports: [
+        port(1433, 'tcp', 'open', 'ms-sql-s',     'Microsoft SQL Server', '2019'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [{ id: 'ms-sql-info', output: 'SQL Server 2019 (RTM-CU19) 15.0.4298.1 (X64)' }],
+    },
+    {
+      ip: '10.10.2.10', mac: '00:50:56:A1:22:01', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'web01.corp.local', type: 'PTR' }],
+      os: linOS('Linux 5.15.X'),
+      ports: [
+        port(22,  'tcp', 'open', 'ssh',   'OpenSSH', '8.9p1'),
+        port(80,  'tcp', 'open', 'http',  'nginx',   '1.23.4'),
+        port(443, 'tcp', 'open', 'https', 'nginx',   '1.23.4'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.2.11', mac: '00:50:56:A1:22:02', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'web02.corp.local', type: 'PTR' }],
+      os: linOS('Linux 5.15.X'),
+      ports: [
+        port(22,  'tcp', 'open', 'ssh',   'OpenSSH', '8.9p1'),
+        port(80,  'tcp', 'open', 'http',  'nginx',   '1.23.4'),
+        port(443, 'tcp', 'open', 'https', 'nginx',   '1.23.4'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.2.20', mac: '00:50:56:A1:22:03', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'db01.corp.local', type: 'PTR' }],
+      os: linOS('Linux 3.10.X'),
+      ports: [
+        port(22,   'tcp', 'open', 'ssh',   'OpenSSH', '7.4'),
+        port(3306, 'tcp', 'open', 'mysql', 'MySQL',   '5.7.44'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.2.30', mac: '00:50:56:A1:22:04', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'jenkins.corp.local', type: 'PTR' }],
+      os: linOS('Linux 5.4.X'),
+      ports: [
+        port(22,   'tcp', 'open', 'ssh',  'OpenSSH',       '8.2p1'),
+        port(8080, 'tcp', 'open', 'http', 'Jetty httpd',   '9.4'),
+        port(8443, 'tcp', 'open', 'ssl/https', 'Jetty httpd', '9.4'),
+      ],
+      scripts: [{ id: 'http-title', output: 'Dashboard [Jenkins]' }],
+    },
+    {
+      ip: '10.10.2.40', mac: '00:50:56:A1:22:05', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'vpn.corp.local', type: 'PTR' }],
+      os: linOS('Linux 5.10.X'),
+      ports: [
+        port(22,   'tcp', 'open',     'ssh',         'OpenSSH',  '9.2p1'),
+        port(443,  'tcp', 'open',     'ssl/https'),
+        port(1194, 'udp', 'open',     'openvpn',     'OpenVPN'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.3.55', mac: '00:50:56:A1:33:01', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'WS-JSMITH', type: 'PTR' }],
+      os: winOS('Windows 11 Pro 22621'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(139,  'tcp', 'open', 'netbios-ssn'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows 11 SMB'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.3.62', mac: '00:50:56:A1:33:02', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'WS-MTHOMAS', type: 'PTR' }],
+      os: winOS('Windows 10 Pro 19044'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows 10 SMB'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.3.71', mac: '00:50:56:A1:33:03', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'WS-CBROWN', type: 'PTR' }],
+      os: winOS('Windows 11 Pro 22621'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows 11 SMB'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.3.80', mac: '00:50:56:A1:33:04', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'WS-RLEE', type: 'PTR' }],
+      os: winOS('Windows 10 Pro 19045'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(445,  'tcp', 'open', 'microsoft-ds', 'Windows 10 SMB'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [],
+    },
+    {
+      ip: '10.10.4.5', mac: '00:50:56:A1:44:01', vendor: 'VMware', status: 'up',
+      hostnames: [{ name: 'KIOSK01.CORP.LOCAL', type: 'PTR' }],
+      os: winOS('Windows 10 Enterprise LTSC 2019'),
+      ports: [
+        port(135,  'tcp', 'open', 'msrpc',        'Microsoft RPC'),
+        port(3389, 'tcp', 'open', 'ms-wbt-server','Microsoft RDP'),
+      ],
+      scripts: [],
+    },
+  ],
+};
+
+const METASPLOIT_PARSED = {
+  hosts: [
+    { ip: '10.10.1.5',  mac: '00:50:56:A1:11:01', hostname: 'DC01',    state: 'alive', purpose: 'server',     arch: 'x64', os: { name: 'Windows Server 2019 Standard', flavor: 'Standard', sp: 'SP0' } },
+    { ip: '10.10.1.20', mac: '00:50:56:A1:11:03', hostname: 'FS01',    state: 'alive', purpose: 'server',     arch: 'x64', os: { name: 'Windows Server 2016 Standard', flavor: 'Standard', sp: 'SP0' } },
+    { ip: '10.10.2.30', mac: '00:50:56:A1:22:04', hostname: 'jenkins', state: 'alive', purpose: 'server',     arch: 'x64', os: { name: 'Ubuntu 20.04.6 LTS',           flavor: null,       sp: null  } },
+    { ip: '10.10.2.10', mac: '00:50:56:A1:22:01', hostname: 'web01',   state: 'alive', purpose: 'server',     arch: 'x64', os: { name: 'Ubuntu 22.04.3 LTS',           flavor: null,       sp: null  } },
+    { ip: '10.10.3.55', mac: '00:50:56:A1:33:01', hostname: 'JSMITH',  state: 'alive', purpose: 'workstation', arch: 'x64', os: { name: 'Windows 11 Pro',              flavor: 'Pro',      sp: 'SP0' } },
+  ],
+  services: [
+    { hostIp: '10.10.1.5',  port: 445,  protocol: 'tcp', state: 'open', name: 'microsoft-ds', banner: 'Windows Server 2019' },
+    { hostIp: '10.10.1.5',  port: 3389, protocol: 'tcp', state: 'open', name: 'ms-wbt-server', banner: null },
+    { hostIp: '10.10.1.5',  port: 88,   protocol: 'tcp', state: 'open', name: 'kerberos-sec',  banner: null },
+    { hostIp: '10.10.1.5',  port: 389,  protocol: 'tcp', state: 'open', name: 'ldap',          banner: 'CORP.LOCAL' },
+    { hostIp: '10.10.1.20', port: 445,  protocol: 'tcp', state: 'open', name: 'microsoft-ds',  banner: 'Windows Server 2016' },
+    { hostIp: '10.10.1.20', port: 3389, protocol: 'tcp', state: 'open', name: 'ms-wbt-server', banner: null },
+    { hostIp: '10.10.2.30', port: 8080, protocol: 'tcp', state: 'open', name: 'http',          banner: 'Jenkins 2.401.3' },
+    { hostIp: '10.10.2.30', port: 22,   protocol: 'tcp', state: 'open', name: 'ssh',           banner: 'OpenSSH 8.2p1' },
+    { hostIp: '10.10.2.10', port: 80,   protocol: 'tcp', state: 'open', name: 'http',          banner: 'nginx 1.23.4' },
+    { hostIp: '10.10.2.10', port: 22,   protocol: 'tcp', state: 'open', name: 'ssh',           banner: 'OpenSSH 8.9p1' },
+    { hostIp: '10.10.3.55', port: 445,  protocol: 'tcp', state: 'open', name: 'microsoft-ds',  banner: 'Windows 11' },
+    { hostIp: '10.10.3.55', port: 3389, protocol: 'tcp', state: 'open', name: 'ms-wbt-server', banner: null },
+  ],
+  vulns: [
+    { hostIp: '10.10.1.5',  name: 'MS17-010 EternalBlue SMB Remote Code Execution', refs: ['CVE-2017-0144', 'CVE-2017-0145', 'MSB-MS17-010'] },
+    { hostIp: '10.10.1.20', name: 'MS17-010 EternalBlue SMB Remote Code Execution', refs: ['CVE-2017-0144', 'MSB-MS17-010'] },
+    { hostIp: '10.10.1.20', name: 'SMB Signing Disabled',                            refs: ['CWE-326'] },
+    { hostIp: '10.10.2.30', name: 'Jenkins Unauthenticated Script Console RCE',      refs: ['CVE-2024-23897'] },
+    { hostIp: '10.10.2.10', name: 'Nginx Misconfiguration — Directory Listing',      refs: [] },
+  ],
+  credentials: [
+    { username: 'Administrator', secret: 'aad3b435b51404eeaad3b435b51404ee:97f2592347d8fbe42be381726ff9ea83', secretType: 'ntlm_hash',  hostIp: '10.10.1.5',  port: 445, protocol: 'tcp' },
+    { username: 'SVC_BACKUP',    secret: 'aad3b435b51404eeaad3b435b51404ee:5835048ce94ad0564e29a924a03510ef', secretType: 'ntlm_hash',  hostIp: '10.10.1.5',  port: 445, protocol: 'tcp' },
+    { username: 'jsmith',        secret: 'Welcome1!',                                                          secretType: 'password',    hostIp: '10.10.3.55', port: 445, protocol: 'tcp' },
+    { username: 'jenkins',       secret: 'jenkins',                                                            secretType: 'password',    hostIp: '10.10.2.30', port: 8080, protocol: 'tcp' },
+  ],
+  sessions: [
+    { hostIp: '10.10.1.5',  sessionType: 'meterpreter', platform: 'windows/x64', exploit: 'exploit/windows/smb/ms17_010_eternalblue', openedAt: new Date(daysAgo(21)).toISOString(), closedAt: null },
+    { hostIp: '10.10.2.30', sessionType: 'meterpreter', platform: 'linux/x64',   exploit: 'exploit/multi/http/jenkins_script_console',  openedAt: new Date(daysAgo(18)).toISOString(), closedAt: new Date(daysAgo(17)).toISOString() },
+  ],
+};
+
+export const mockImports = {
+  [ENG_ID]: [
+    {
+      id:         'mock-import-nmap-01',
+      importType: 'nmap',
+      fileName:   'corp_full_sweep_day1.xml',
+      importedAt: daysAgo(28),
+      parsed:     NMAP_PARSED,
+      summary: {
+        hostsUp:    15,
+        hostsTotal: 1016,
+        openPorts:  NMAP_PARSED.hosts.reduce((n, h) => n + h.ports.filter(p => p.state === 'open').length, 0),
+      },
+    },
+    {
+      id:         'mock-import-msf-01',
+      importType: 'metasploit',
+      fileName:   'corp_pentest_workspace.xml',
+      importedAt: daysAgo(5),
+      parsed:     METASPLOIT_PARSED,
+      summary: {
+        hostCount:    METASPLOIT_PARSED.hosts.length,
+        serviceCount: METASPLOIT_PARSED.services.length,
+        vulnCount:    METASPLOIT_PARSED.vulns.length,
+        credCount:    METASPLOIT_PARSED.credentials.length,
+        sessionCount: METASPLOIT_PARSED.sessions.length,
+      },
+    },
+  ],
 };
 
 export const mockSnapshots = {

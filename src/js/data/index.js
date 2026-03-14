@@ -1,6 +1,6 @@
 import { Auth } from 'aws-amplify';
 import { DEBUG_MODE } from '../config.js';
-import { mockEngagements, mockEngagementData, mockSnapshots, MOCK_ENG_ID } from './mockScenario.js';
+import { mockEngagements, mockEngagementData, mockSnapshots, mockImports, MOCK_ENG_ID } from './mockScenario.js';
 import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp } from './parsers.js';
 
 
@@ -112,7 +112,7 @@ export async function saveSnapshots(engagementId, snapshots) {
 // Stored at engagements/{id}/imports.json via Lambda route /engagement/{id}/imports
 
 export async function loadImports(engagementId) {
-  if (mockMode) return [];
+  if (mockMode) return mockImports[engagementId] || [];
   return await apiGet(`/engagement/${engagementId}/imports`) || [];
 }
 
