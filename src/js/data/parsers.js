@@ -23,6 +23,10 @@ export function detectOS(raw) {
   if (/share name\s+resource/i.test(raw)) return 'windows';
   if (/S-1-5-\d+-\d+/i.test(raw)) return 'windows';
   if (/user name\s+\S/im.test(raw) && /account active/im.test(raw)) return 'windows';
+  if (/pdcemulator\s*:/i.test(raw) || /schemamaster\s*:/i.test(raw)) return 'windows';
+  if (/trustdirection\s*:/i.test(raw) || /list of domain trusts:/i.test(raw)) return 'windows';
+  if (/distinguishedname\s*:\s*ou=/i.test(raw)) return 'windows';
+  if (/sanitized name:/i.test(raw) && /config:/i.test(raw)) return 'windows';
   // Linux — new command types
   if (/^[a-z_][a-z0-9_-]*:[x*!]:\d+:\d+:/m.test(raw)) return 'linux';
   if (/^[a-z_][a-z0-9_-]*:\$[0-9ay]/m.test(raw)) return 'linux';
@@ -77,6 +81,26 @@ export function detectCommand(raw) {
   if (/minimum password age/i.test(raw) && /maximum password age/i.test(raw)) return 'netaccounts';
   // net share
   if (/share name\s+resource/i.test(raw)) return 'netshare';
+  // AD domain / forest — Get-ADDomain, Get-ADForest, Get-Domain (PowerView)
+  if (/forest\s*:/i.test(raw) && /domainmode\s*:/i.test(raw) && /pdcemulator\s*:/i.test(raw)) return 'addomain';
+  if (/schemamaster\s*:/i.test(raw) && /domainnamingmaster\s*:/i.test(raw) && /forestmode\s*:/i.test(raw)) return 'addomain';
+  if (/domainsid\s*:/i.test(raw) && /forest\s*:/i.test(raw) && /pdcemulator\s*:/i.test(raw)) return 'addomain';
+  // AD domain controllers — Get-ADDomainController, nltest /dclist, Get-DomainController
+  if (/defaultpartition\s*:/i.test(raw) && /operationmasterroles\s*:/i.test(raw) && /isglobalcatalog\s*:/i.test(raw)) return 'addomaincontrollers';
+  if (/dc:\s+\\\\/i.test(raw) && /\[ds\]/i.test(raw)) return 'addomaincontrollers';
+  if (/ipaddress\s*:/i.test(raw) && /osversion\s*:/i.test(raw) && /roles\s*:/i.test(raw)) return 'addomaincontrollers';
+  // AD trusts — nltest /domain_trusts, Get-ADTrust, Get-DomainTrust
+  if (/list of domain trusts:/i.test(raw)) return 'adtrusts';
+  if (/trustdirection\s*:/i.test(raw) && /trusttype\s*:/i.test(raw) && /trustattributes\s*:/i.test(raw)) return 'adtrusts';
+  if (/trustdirection\s*:/i.test(raw) && /trusttype\s*:/i.test(raw) && /intraforest\s*:/i.test(raw)) return 'adtrusts';
+  // AD OUs — Get-ADOrganizationalUnit, Get-DomainOU, dsquery ou
+  if (/distinguishedname\s*:\s*ou=/i.test(raw)) return 'adous';
+  if (/gplink\s*:/i.test(raw) && /distinguishedname\s*:/i.test(raw)) return 'adous';
+  if (/^"OU=/m.test(raw) && raw.split('\n').filter(l => /^"OU=/i.test(l.trim())).length >= 1) return 'adous';
+  // AD certificate authorities — certutil -CA, certutil -ping
+  if (/sanitized name:/i.test(raw) && /config:/i.test(raw) && /ca name:/i.test(raw)) return 'adcs';
+  if (/certutil: -ping command/i.test(raw)) return 'adcs';
+  if (/dnshostname\s*:/i.test(raw) && /certtemplates\s*:/i.test(raw)) return 'adcs';
   return 'unknown';
 }
 
@@ -605,6 +629,275 @@ export function parseNetShare(raw) {
   return { shares };
 }
 
+// ── AD domain / forest ───────────────────────────────────
+// Parses: Get-ADDomain, Get-ADForest, PowerView Get-Domain
+// Schema: { name, netbiosName, domainSid, forest, domainMode, forestMode,
+//           pdcEmulator, ridMaster, schemaMaster, domainNamingMaster,
+//           infrastructureMaster, childDomains, globalCatalogs, sites, upnSuffixes }
+
+export function parseADDomain(text) {
+  function field(key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.*)', 'im');
+    const m  = text.match(re);
+    return m ? m[1].trim() || null : null;
+  }
+
+  function parseList(raw) {
+    if (!raw) return [];
+    const inner = raw.match(/^\{(.*)\}$/s);
+    const src   = inner ? inner[1] : raw;
+    return src.split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  return {
+    name:                 field('Name') ?? field('RootDomain'),
+    netbiosName:          field('NetBIOSName'),
+    domainSid:            field('DomainSID'),
+    forest:               field('Forest'),
+    domainMode:           field('DomainMode'),
+    forestMode:           field('ForestMode'),
+    pdcEmulator:          field('PDCEmulator'),
+    ridMaster:            field('RIDMaster'),
+    schemaMaster:         field('SchemaMaster'),
+    domainNamingMaster:   field('DomainNamingMaster'),
+    infrastructureMaster: field('InfrastructureMaster'),
+    childDomains:         parseList(field('ChildDomains')),
+    globalCatalogs:       parseList(field('GlobalCatalogs')),
+    sites:                parseList(field('Sites')),
+    upnSuffixes:          parseList(field('UPNSuffixes')),
+  };
+}
+
+// ── AD domain controllers ─────────────────────────────────
+// Parses: Get-ADDomainController -Filter *, nltest /dclist:, Get-DomainController
+// Schema: { domainControllers: [{ name, hostname, ip, domain, site, os, isGlobalCatalog, isReadOnly, roles }] }
+
+export function parseADDomainControllers(text) {
+  const domainControllers = [];
+
+  // nltest /dclist: format — one DC hostname per line
+  if (/dc:\s+\\\\/i.test(text)) {
+    for (const line of text.split('\n')) {
+      const m = line.match(/dc:\s+\\\\(\S+)/i);
+      if (m) {
+        domainControllers.push({
+          name:          m[1],
+          hostname:      m[1],
+          ip:            null,
+          domain:        null,
+          site:          null,
+          os:            null,
+          isGlobalCatalog: /\[GC\]/i.test(line),
+          isReadOnly:    false,
+          roles:         [],
+        });
+      }
+    }
+    return { domainControllers };
+  }
+
+  // Get-ADDomainController / Get-DomainController — split on blank lines between records
+  function field(block, key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.*)', 'im');
+    const m  = block.match(re);
+    return m ? m[1].trim() || null : null;
+  }
+  function parseList(raw) {
+    if (!raw) return [];
+    const inner = raw.match(/^\{(.*)\}$/s);
+    const src   = inner ? inner[1] : raw;
+    return src.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  function parseBool(val) {
+    if (!val) return false;
+    return /^true$/i.test(val.trim());
+  }
+
+  const blocks = text.split(/\n\s*\n+/).filter(b => b.trim());
+  for (const block of blocks) {
+    const hostname = field(block, 'HostName') ?? field(block, 'Name');
+    if (!hostname) continue;
+    domainControllers.push({
+      name:          field(block, 'Name') ?? hostname,
+      hostname,
+      ip:            field(block, 'IPAddress'),
+      domain:        field(block, 'Domain'),
+      site:          field(block, 'Site'),
+      os:            field(block, 'OperatingSystem') ?? field(block, 'OSVersion'),
+      isGlobalCatalog: parseBool(field(block, 'IsGlobalCatalog')),
+      isReadOnly:    parseBool(field(block, 'IsReadOnly')),
+      roles:         parseList(field(block, 'OperationMasterRoles') ?? field(block, 'Roles')),
+    });
+  }
+  return { domainControllers };
+}
+
+// ── AD trusts ─────────────────────────────────────────────
+// Parses: nltest /domain_trusts, Get-ADTrust, Get-DomainTrust
+// Schema: { trusts: [{ targetDomain, sourceDomain, direction, trustType, isTransitive, isForest }] }
+
+export function parseADTrusts(text) {
+  const trusts = [];
+
+  // nltest /domain_trusts format
+  if (/list of domain trusts:/i.test(text)) {
+    for (const line of text.split('\n')) {
+      // e.g.  0: CORP corp.local (NT 5) (Forest: 2) (Direct Outbound)
+      const m = line.match(/^\s*\d+:\s+\S+\s+(\S+)\s/);
+      if (!m) continue;
+      const targetDomain = m[1];
+      let direction = 'Unknown';
+      if (/direct inbound/i.test(line) && /direct outbound/i.test(line)) direction = 'BiDirectional';
+      else if (/direct inbound/i.test(line))  direction = 'Inbound';
+      else if (/direct outbound/i.test(line)) direction = 'Outbound';
+      trusts.push({
+        targetDomain,
+        sourceDomain:  null,
+        direction,
+        trustType:     /forest tree root/i.test(line) ? 'ForestTreeRoot' : (/forest/i.test(line) ? 'Forest' : null),
+        isTransitive:  !/attr:.*0x[0-9a-f]*4[0-9a-f]/i.test(line), // non-transitive flag bit
+        isForest:      /forest/i.test(line),
+      });
+    }
+    return { trusts };
+  }
+
+  // Get-ADTrust / Get-DomainTrust — split on blank lines between records
+  function field(block, key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.*)', 'im');
+    const m  = block.match(re);
+    return m ? m[1].trim() || null : null;
+  }
+  function parseBool(val) {
+    if (!val) return false;
+    return /^true$/i.test(val.trim());
+  }
+
+  const blocks = text.split(/\n\s*\n+/).filter(b => b.trim());
+  for (const block of blocks) {
+    const target = field(block, 'Target') ?? field(block, 'Name');
+    if (!target) continue;
+    trusts.push({
+      targetDomain:  target,
+      sourceDomain:  field(block, 'Source'),
+      direction:     field(block, 'Direction') ?? field(block, 'TrustDirection') ?? 'Unknown',
+      trustType:     field(block, 'TrustType'),
+      isTransitive:  !parseBool(field(block, 'DisallowTransivity')),
+      isForest:      parseBool(field(block, 'ForestTransitive')) || parseBool(field(block, 'IntraForest')),
+    });
+  }
+  return { trusts };
+}
+
+// ── AD OUs ────────────────────────────────────────────────
+// Parses: Get-ADOrganizationalUnit -Filter *, Get-DomainOU, dsquery ou
+// Schema: { ous: [{ name, distinguishedName, linkedGPOs, managedBy }] }
+
+export function parseADOUs(text) {
+  const ous = [];
+
+  // dsquery ou format: lines that are quoted DN strings
+  if (/^"OU=/m.test(text) && !/distinguishedname\s*:/i.test(text)) {
+    for (const line of text.split('\n')) {
+      const t = line.trim().replace(/^"|"$/g, '');
+      if (!/^OU=/i.test(t)) continue;
+      const nameM = t.match(/^OU=([^,]+)/i);
+      ous.push({
+        name:              nameM ? nameM[1] : t,
+        distinguishedName: t,
+        linkedGPOs:        [],
+        managedBy:         null,
+      });
+    }
+    return { ous };
+  }
+
+  // Get-ADOrganizationalUnit / Get-DomainOU — split on blank lines
+  function field(block, key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.*)', 'im');
+    const m  = block.match(re);
+    return m ? m[1].trim() || null : null;
+  }
+  function parseList(raw) {
+    if (!raw) return [];
+    const inner = raw.match(/^\{(.*)\}$/s);
+    const src   = inner ? inner[1] : raw;
+    return src.split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  const blocks = text.split(/\n\s*\n+/).filter(b => b.trim());
+  for (const block of blocks) {
+    const dn = field(block, 'DistinguishedName') ?? field(block, 'distinguishedname');
+    if (!dn || !/OU=/i.test(dn)) continue;
+    const nameM = dn.match(/^OU=([^,]+)/i);
+    ous.push({
+      name:              field(block, 'Name') ?? field(block, 'ou') ?? (nameM ? nameM[1] : dn),
+      distinguishedName: dn,
+      linkedGPOs:        parseList(field(block, 'LinkedGroupPolicyObjects') ?? field(block, 'gplink')),
+      managedBy:         field(block, 'ManagedBy') || null,
+    });
+  }
+  return { ous };
+}
+
+// ── AD certificate authorities ────────────────────────────
+// Parses: certutil -CA, certutil -config - -ping, Get-PKIEnrollmentService
+// Schema: { cas: [{ name, server, config, sanitizedName, webEnrollmentServers }] }
+
+export function parseADCS(text) {
+  const cas = [];
+
+  // certutil -CA format: blocks starting with "Entry N: ..."
+  if (/entry\s+\d+:/i.test(text) || /sanitized name:/i.test(text)) {
+    // Split on Entry N: or double blank lines
+    const blocks = text.split(/\n(?=\s*Entry\s+\d+:)/i).filter(b => b.trim());
+
+    function fieldQ(block, key) {
+      const re = new RegExp(key + '\\s*:\\s*"([^"]*)"', 'i');
+      const m  = block.match(re);
+      return m ? (m[1].trim() || null) : null;
+    }
+    function parseWebServers(raw) {
+      if (!raw) return [];
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    for (const block of blocks) {
+      const name = fieldQ(block, 'Name') ?? fieldQ(block, 'Authority');
+      if (!name) continue;
+      cas.push({
+        name,
+        server:              fieldQ(block, 'Server'),
+        config:              fieldQ(block, 'Config'),
+        sanitizedName:       fieldQ(block, 'Sanitized Name') ?? fieldQ(block, 'Sanitized Short Name'),
+        webEnrollmentServers: parseWebServers(fieldQ(block, 'Web Enrollment Servers')),
+      });
+    }
+    return { cas };
+  }
+
+  // Get-PKIEnrollmentService / PowerView Get-DomainCA — key: value format
+  function field(block, key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.*)', 'im');
+    const m  = block.match(re);
+    return m ? m[1].trim() || null : null;
+  }
+
+  const blocks2 = text.split(/\n\s*\n+/).filter(b => b.trim());
+  for (const block of blocks2) {
+    const name = field(block, 'Name') ?? field(block, 'DisplayName');
+    if (!name) continue;
+    cas.push({
+      name,
+      server:              field(block, 'dnsHostname') ?? field(block, 'Server'),
+      config:              field(block, 'Config'),
+      sanitizedName:       null,
+      webEnrollmentServers: [],
+    });
+  }
+  return { cas };
+}
+
 // ── File-based import parsers ─────────────────────────────
 //
 // These parse tool output files (XML, JSONL, ZIP, CSV) rather than paste-in
@@ -1028,6 +1321,245 @@ export function parseNuciei(jsonlString) {
   return { findings };
 }
 
+// ── SharpHound ZIP parser ─────────────────────────────────
+// Input:  SharpHound ZIP containing typed JSON files
+// See schema comment near line 614
+
+export async function parseSharpHound(arrayBuffer) {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(arrayBuffer);
+
+  const result = {
+    collectedAt: null,
+    domain:      null,
+    version:     null,
+    users:       [],
+    computers:   [],
+    groups:      [],
+    domains:     [],
+    gpos:        [],
+    aces:        [],
+    cas:         [],
+    ous:         [],
+  };
+
+  const fileNames = Object.keys(zip.files);
+
+  for (const fname of fileNames) {
+    const zipFile = zip.files[fname];
+    if (zipFile.dir) continue;
+
+    let text;
+    try {
+      text = await zipFile.async('text');
+    } catch {
+      continue;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+
+    if (!parsed || !parsed.meta) continue;
+
+    const meta = parsed.meta;
+    const dataArr = parsed.data || [];
+    const type = (meta.type || '').toLowerCase();
+
+    // Capture version from first meta we encounter
+    if (result.version === null && meta.version != null) {
+      result.version = meta.version;
+    }
+
+    if (type === 'users') {
+      for (const u of dataArr) {
+        const props = u.Properties || {};
+        const memberOf = (u.MemberOf || []).map(m => m.ObjectIdentifier || m).filter(Boolean);
+        result.users.push({
+          objectId:   u.ObjectIdentifier || null,
+          name:       props.name || null,
+          domain:     props.domain || null,
+          enabled:    props.enabled ?? null,
+          lastLogon:  props.lastlogon ?? null,
+          pwdLastSet: props.pwdlastset ?? null,
+          hasSPN:     props.hasspn ?? null,
+          adminCount: props.admincount ?? null,
+          memberOf,
+        });
+        // Collect ACEs
+        for (const ace of (u.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     u.ObjectIdentifier || null,
+            objectType:    'User',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'computers') {
+      for (const c of dataArr) {
+        const props = c.Properties || {};
+        const localAdmins = ((c.LocalAdmins || {}).Results || [])
+          .map(a => a.ObjectIdentifier || a).filter(Boolean);
+        const sessions = ((c.Sessions || {}).Results || [])
+          .map(s => ({ userId: s.UserSID || s.ObjectIdentifier || null, isAdmin: s.IsAdmin ?? null }));
+        result.computers.push({
+          objectId:                c.ObjectIdentifier || null,
+          name:                    props.name || null,
+          domain:                  props.domain || null,
+          enabled:                 props.enabled ?? null,
+          os:                      props.operatingsystem || null,
+          unconstrainedDelegation: props.unconstraineddelegation ?? null,
+          localAdmins,
+          sessions,
+        });
+        for (const ace of (c.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     c.ObjectIdentifier || null,
+            objectType:    'Computer',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'groups') {
+      for (const g of dataArr) {
+        const props = g.Properties || {};
+        const members = (g.Members || []).map(m => ({
+          objectId:   m.ObjectIdentifier || null,
+          objectType: m.ObjectType || null,
+        }));
+        result.groups.push({
+          objectId: g.ObjectIdentifier || null,
+          name:     props.name || null,
+          domain:   props.domain || null,
+          members,
+        });
+        for (const ace of (g.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     g.ObjectIdentifier || null,
+            objectType:    'Group',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'domains') {
+      for (const d of dataArr) {
+        const props = d.Properties || {};
+        const trusts = (d.Trusts || []).map(t => ({
+          targetDomain:  t.TargetDomainName || t.TargetDomain || null,
+          trustType:     t.TrustType || null,
+          trustDirection: t.TrustDirection || null,
+          isTransitive:  t.IsTransitive ?? null,
+        }));
+        result.domains.push({
+          objectId: d.ObjectIdentifier || null,
+          name:     props.name || null,
+          trusts,
+        });
+        // Use first domain name as the top-level domain
+        if (result.domain === null && props.name) {
+          result.domain = props.name;
+        }
+        for (const ace of (d.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     d.ObjectIdentifier || null,
+            objectType:    'Domain',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'gpos') {
+      for (const g of dataArr) {
+        const props = g.Properties || {};
+        result.gpos.push({
+          objectId: g.ObjectIdentifier || null,
+          name:     props.name || null,
+          guid:     props.guid || null,
+          domain:   props.domain || null,
+        });
+        for (const ace of (g.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     g.ObjectIdentifier || null,
+            objectType:    'GPO',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'cas') {
+      for (const ca of dataArr) {
+        const props = ca.Properties || {};
+        const certTemplates = props.certtemplatelist || ca.CertTemplates || [];
+        result.cas.push({
+          objectId:      ca.ObjectIdentifier || null,
+          name:          props.name || null,
+          domain:        props.domain || null,
+          dnsName:       props.dnshostname || null,
+          certTemplates: Array.isArray(certTemplates) ? certTemplates : [],
+        });
+        for (const ace of (ca.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     ca.ObjectIdentifier || null,
+            objectType:    'CA',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    } else if (type === 'ous') {
+      for (const ou of dataArr) {
+        const props = ou.Properties || {};
+        result.ous.push({
+          objectId:   ou.ObjectIdentifier || null,
+          name:       props.name || null,
+          domain:     props.domain || null,
+          guid:       props.guid || null,
+          properties: props,
+        });
+        for (const ace of (ou.Aces || [])) {
+          result.aces.push({
+            principalSid:  ace.PrincipalSID || null,
+            principalType: ace.PrincipalType || null,
+            rightName:     ace.RightName || null,
+            objectSid:     ou.ObjectIdentifier || null,
+            objectType:    'OU',
+            isInherited:   ace.IsInherited ?? null,
+          });
+        }
+      }
+    }
+  }
+
+  // Attempt to derive collectedAt from whencreated on any user/computer
+  const allItems = [...result.users, ...result.computers];
+  const timestamps = allItems
+    .map(i => i.pwdLastSet ?? i.lastLogon)
+    .filter(t => t != null && t > 0);
+  if (timestamps.length > 0) {
+    result.collectedAt = Math.max(...timestamps);
+  }
+
+  return result;
+}
+
 // ── Diff helpers ──────────────────────────────────────────
 
 export function diffSnapshots(prev, curr) {
@@ -1070,6 +1602,46 @@ export function diffSnapshots(prev, curr) {
     return {
       added:   [...currIPs].filter(ip => !prevIPs.has(ip)),
       removed: [...prevIPs].filter(ip => !currIPs.has(ip)),
+    };
+  }
+
+  if (type === 'addomaincontrollers') {
+    const key  = dc => dc.hostname ?? dc.name;
+    const prevSet = new Set((prev.parsed?.domainControllers || []).map(key));
+    const currSet = new Set((curr.parsed?.domainControllers || []).map(key));
+    return {
+      added:   (curr.parsed?.domainControllers || []).filter(dc => !prevSet.has(key(dc))),
+      removed: (prev.parsed?.domainControllers || []).filter(dc => !currSet.has(key(dc))),
+    };
+  }
+
+  if (type === 'adtrusts') {
+    const key  = t => t.targetDomain;
+    const prevSet = new Set((prev.parsed?.trusts || []).map(key));
+    const currSet = new Set((curr.parsed?.trusts || []).map(key));
+    return {
+      added:   (curr.parsed?.trusts || []).filter(t => !prevSet.has(key(t))),
+      removed: (prev.parsed?.trusts || []).filter(t => !currSet.has(key(t))),
+    };
+  }
+
+  if (type === 'adous') {
+    const key  = ou => ou.distinguishedName;
+    const prevSet = new Set((prev.parsed?.ous || []).map(key));
+    const currSet = new Set((curr.parsed?.ous || []).map(key));
+    return {
+      added:   (curr.parsed?.ous || []).filter(ou => !prevSet.has(key(ou))),
+      removed: (prev.parsed?.ous || []).filter(ou => !currSet.has(key(ou))),
+    };
+  }
+
+  if (type === 'adcs') {
+    const key  = ca => ca.name;
+    const prevSet = new Set((prev.parsed?.cas || []).map(key));
+    const currSet = new Set((curr.parsed?.cas || []).map(key));
+    return {
+      added:   (curr.parsed?.cas || []).filter(ca => !prevSet.has(key(ca))),
+      removed: (prev.parsed?.cas || []).filter(ca => !currSet.has(key(ca))),
     };
   }
 

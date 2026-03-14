@@ -1,5 +1,5 @@
 import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, loadImports, saveImports, newHost, newNote, newImport, saveEngagements } from '../data/index.js';
-import { detectFileType, parseNmap, parseMetasploit, parseNessus, parseNuciei } from '../data/parsers.js';
+import { detectFileType, parseNmap, parseMetasploit, parseNessus, parseNuciei, parseSharpHound } from '../data/parsers.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
@@ -421,10 +421,13 @@ export async function renderEngagement(engagementId) {
       const file = fileInput.files[0];
       if (!file) return;
       fileName = file.name;
+
+      // Detect type from filename (ZIP detection only needs the name)
+      const earlyType = detectFileType(fileName, '');
+      const isZip = earlyType === 'sharphound';
+
       const reader = new FileReader();
-      reader.onload = e => {
-        fileContent  = e.target.result;
-        detectedType = detectFileType(fileName, fileContent);
+      reader.onload = async e => {
         parsedResult = null;
 
         preview.className = 'bg-slate-50 rounded-lg px-3 py-2.5 mb-4 text-sm';
@@ -432,6 +435,14 @@ export async function renderEngagement(engagementId) {
 
         const typeEl = document.createElement('p');
         typeEl.className = 'font-medium text-slate-700 mb-1';
+
+        if (isZip) {
+          detectedType = 'sharphound';
+          fileContent  = null; // binary — not stored as text
+        } else {
+          fileContent  = e.target.result;
+          detectedType = detectFileType(fileName, fileContent);
+        }
 
         if (detectedType === 'unknown') {
           typeEl.textContent = 'Unrecognized file format';
@@ -445,7 +456,10 @@ export async function renderEngagement(engagementId) {
         preview.appendChild(typeEl);
 
         try {
-          if (detectedType === 'nmap') {
+          if (detectedType === 'sharphound') {
+            parsedResult = await parseSharpHound(e.target.result);
+            addPreviewStat(preview, `${parsedResult.computers.length} computers · ${parsedResult.users.length} users · ${parsedResult.groups.length} groups · ${parsedResult.domains.length} domains`);
+          } else if (detectedType === 'nmap') {
             parsedResult = parseNmap(fileContent);
             const openPorts = parsedResult.hosts.reduce((n, h) => n + h.ports.filter(p => p.state === 'open').length, 0);
             addPreviewStat(preview, `${parsedResult.hostsUp} hosts up of ${parsedResult.hostsTotal} · ${openPorts} open ports`);
@@ -477,7 +491,12 @@ export async function renderEngagement(engagementId) {
           saveBtn.disabled = true;
         }
       };
-      reader.readAsText(file);
+
+      if (isZip) {
+        reader.readAsArrayBuffer(file);
+      } else {
+        reader.readAsText(file);
+      }
     };
 
     const actions = document.createElement('div');

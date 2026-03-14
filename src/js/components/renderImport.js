@@ -12,6 +12,8 @@ export function renderImport(engagementId, importObj, onBack) {
     renderNessus(container, importObj, onBack);
   } else if (importObj.importType === 'nuclei') {
     renderNuciei(container, importObj, onBack);
+  } else if (importObj.importType === 'sharphound') {
+    renderSharpHound(container, importObj, onBack);
   } else {
     renderGeneric(container, importObj, onBack);
   }
@@ -401,6 +403,186 @@ function nucleiSeverityCell(severity) {
   badge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[severity] || colors.info}`;
   badge.textContent = severity ? severity.charAt(0).toUpperCase() + severity.slice(1) : '—';
   td.appendChild(badge);
+  return td;
+}
+
+// ── SharpHound detail view ────────────────────────────────
+
+function renderSharpHound(container, importObj, onBack) {
+  const parsed = importObj.parsed || {};
+
+  let activeInnerTab = 'computers';
+
+  // Header
+  const header = buildHeader(container, importObj, onBack);
+
+  if (parsed.domain) {
+    const domainRow = document.createElement('p');
+    domainRow.className = 'text-xs text-slate-500 font-mono mb-1';
+    domainRow.textContent = `Domain: ${parsed.domain}`;
+    header.appendChild(domainRow);
+  }
+
+  if (parsed.collectedAt) {
+    const dateRow = document.createElement('p');
+    dateRow.className = 'text-xs text-slate-400 mb-4';
+    dateRow.textContent = `Collected: ${new Date(parsed.collectedAt * 1000).toLocaleString()}`;
+    header.appendChild(dateRow);
+  }
+
+  // Stats row
+  buildStatsRow(container, [
+    { label: 'Computers', value: (parsed.computers || []).length },
+    { label: 'Users',     value: (parsed.users     || []).length },
+    { label: 'Groups',    value: (parsed.groups     || []).length },
+    { label: 'Domains',   value: (parsed.domains    || []).length },
+    { label: 'CAs',       value: (parsed.cas        || []).length },
+  ]);
+
+  // Inner tab bar + content wrapper
+  const tabSection = document.createElement('div');
+  container.appendChild(tabSection);
+
+  function renderInnerTabs() {
+    tabSection.innerHTML = '';
+
+    const tabBar = document.createElement('div');
+    tabBar.className = 'flex items-center gap-1 mb-4 border-b border-slate-200';
+
+    const innerTabs = [
+      { id: 'computers', label: 'Computers' },
+      { id: 'users',     label: 'Users' },
+      { id: 'groups',    label: 'Groups' },
+      { id: 'domains',   label: 'Domains' },
+      { id: 'ous',       label: 'OUs' },
+      { id: 'cas',       label: 'CAs' },
+    ];
+
+    innerTabs.forEach(({ id, label }) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        activeInnerTab === id
+          ? 'border-indigo-600 text-indigo-700'
+          : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+      }`;
+      tab.textContent = label;
+      tab.onclick = () => { activeInnerTab = id; renderInnerTabs(); };
+      tabBar.appendChild(tab);
+    });
+
+    tabSection.appendChild(tabBar);
+
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'bg-white rounded-xl border border-slate-200 overflow-hidden';
+
+    if (activeInnerTab === 'computers') {
+      const computers = parsed.computers || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'OS', 'Domain', 'Unconstrained Delegation'],
+        computers,
+        c => [
+          monoCell(c.name || '—'),
+          textCell(c.os || '—'),
+          textCell(c.domain || '—'),
+          shBoolCell(c.unconstrainedDelegation, 'YES', 'bg-red-100 text-red-700'),
+        ],
+        'No computers collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'users') {
+      const users = parsed.users || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'Domain', 'Enabled', 'Has SPN', 'Admin Count'],
+        users,
+        u => [
+          monoCell(u.name || '—'),
+          textCell(u.domain || '—'),
+          shBoolCell(u.enabled),
+          shBoolCell(u.hasSPN),
+          textCell(u.adminCount != null ? String(u.adminCount) : '—'),
+        ],
+        'No users collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'groups') {
+      const groups = parsed.groups || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'Domain', 'Member Count'],
+        groups,
+        g => [
+          monoCell(g.name || '—'),
+          textCell(g.domain || '—'),
+          textCell(String((g.members || []).length)),
+        ],
+        'No groups collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'domains') {
+      const domains = parsed.domains || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'Trusts'],
+        domains,
+        d => [
+          monoCell(d.name || '—'),
+          textCell(String((d.trusts || []).length)),
+        ],
+        'No domains collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'ous') {
+      const ous = parsed.ous || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'Domain'],
+        ous,
+        ou => [
+          monoCell(ou.name || '—'),
+          textCell(ou.domain || '—'),
+        ],
+        'No OUs collected.'
+      ));
+    }
+
+    if (activeInnerTab === 'cas') {
+      const cas = parsed.cas || [];
+      tableWrap.appendChild(buildTable(
+        ['Name', 'DNS Name', 'Cert Templates'],
+        cas,
+        ca => [
+          monoCell(ca.name || '—'),
+          monoCell(ca.dnsName || '—'),
+          textCell(String((ca.certTemplates || []).length)),
+        ],
+        'No CAs collected.'
+      ));
+    }
+
+    tabSection.appendChild(tableWrap);
+  }
+
+  renderInnerTabs();
+}
+
+function shBoolCell(value, trueLabel = 'Yes', trueClass = 'bg-green-100 text-green-700') {
+  const td = document.createElement('td');
+  td.className = 'px-4 py-2.5';
+  if (value == null) {
+    td.innerHTML = '<span class="text-slate-300 text-xs">—</span>';
+  } else if (value) {
+    const badge = document.createElement('span');
+    badge.className = `inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${trueClass}`;
+    badge.textContent = trueLabel;
+    td.appendChild(badge);
+  } else {
+    const badge = document.createElement('span');
+    badge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-400';
+    badge.textContent = 'No';
+    td.appendChild(badge);
+  }
   return td;
 }
 

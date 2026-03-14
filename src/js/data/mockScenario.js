@@ -428,6 +428,108 @@ const METASPLOIT_PARSED = {
   ],
 };
 
+// ── Mock Nessus scan results ──────────────────────────────
+
+const NESSUS_PARSED = {
+  policyName: 'Internal Network Scan',
+  hosts: [
+    {
+      ip: '10.10.1.5', hostname: 'DC01.corp.local', os: 'Windows Server 2019 Standard', mac: '00:50:56:A1:11:01',
+      scanStart: daysAgo(10), scanEnd: daysAgo(10) + 3600,
+      findings: [
+        { port: 445, protocol: 'tcp', severity: 3, pluginId: '57608', pluginName: 'SMB Signing Not Required', synopsis: 'Signing is not required on the remote SMB server.', description: 'The remote SMB server does not enforce message signing. An unauthenticated attacker can exploit this to conduct man-in-the-middle attacks.', solution: 'Enforce message signing in the host configuration.', cvssScore: 5.0, cvss3Score: 7.5, cveIds: [], exploitAvailable: false, pluginOutput: null },
+        { port: 3389, protocol: 'tcp', severity: 2, pluginId: '30218', pluginName: 'Terminal Services Encryption Level Is Medium or Low', synopsis: 'The remote Terminal Services is not configured to use high-level encryption.', description: null, solution: 'Change RDP encryption level to High.', cvssScore: 4.3, cvss3Score: null, cveIds: [], exploitAvailable: false, pluginOutput: null },
+        { port: 0, protocol: 'tcp', severity: 1, pluginId: '11936', pluginName: 'OS Identification', synopsis: null, description: null, solution: null, cvssScore: null, cvss3Score: null, cveIds: [], exploitAvailable: false, pluginOutput: 'The remote host is running Microsoft Windows Server 2019 Standard' },
+      ],
+    },
+    {
+      ip: '10.10.2.10', hostname: 'WEB01.corp.local', os: 'Linux Kernel 5.15', mac: '00:50:56:A1:22:01',
+      scanStart: daysAgo(10), scanEnd: daysAgo(10) + 3600,
+      findings: [
+        { port: 80, protocol: 'tcp', severity: 4, pluginId: '90317', pluginName: 'Apache Struts CVE-2017-5638 RCE', synopsis: 'The remote host is running a vulnerable version of Apache Struts.', description: 'A remote code execution vulnerability exists in Apache Struts due to improper handling of the Content-Type header.', solution: 'Upgrade to Apache Struts 2.3.32 or 2.5.10.1 or later.', cvssScore: 10.0, cvss3Score: 10.0, cveIds: ['CVE-2017-5638'], exploitAvailable: true, pluginOutput: 'Struts version: 2.3.5' },
+        { port: 443, protocol: 'tcp', severity: 3, pluginId: '51192', pluginName: 'SSL Certificate Cannot Be Trusted', synopsis: 'The SSL certificate for this service cannot be trusted.', description: null, solution: 'Purchase or generate a proper SSL certificate for the service.', cvssScore: 6.4, cvss3Score: 7.5, cveIds: [], exploitAvailable: false, pluginOutput: null },
+        { port: 80, protocol: 'tcp', severity: 1, pluginId: '10107', pluginName: 'HTTP Server Type and Version', synopsis: null, description: null, solution: null, cvssScore: null, cvss3Score: null, cveIds: [], exploitAvailable: false, pluginOutput: 'Apache/2.4.41 (Ubuntu)' },
+      ],
+    },
+    {
+      ip: '10.10.2.30', hostname: 'JENKINS.corp.local', os: 'Linux Kernel 5.4', mac: null,
+      scanStart: daysAgo(10), scanEnd: daysAgo(10) + 3600,
+      findings: [
+        { port: 8080, protocol: 'tcp', severity: 4, pluginId: '97999', pluginName: 'Jenkins Unauthenticated RCE (CVE-2017-1000353)', synopsis: 'Unauthenticated remote code execution in Jenkins.', description: 'Jenkins before 2.89 and LTS before 2.73.3 allow unauthenticated remote code execution via a deserialization attack.', solution: 'Upgrade Jenkins to 2.89 or 2.73.3 (LTS) or later.', cvssScore: 9.8, cvss3Score: 9.8, cveIds: ['CVE-2017-1000353'], exploitAvailable: true, pluginOutput: 'Detected Jenkins 2.60.3' },
+        { port: 8080, protocol: 'tcp', severity: 2, pluginId: '42873', pluginName: 'SSL/TLS Protocol Initialization Vector Implementation Information Disclosure Vulnerability (BEAST)', synopsis: null, description: null, solution: 'Configure SSL/TLS to use TLS 1.1 or later.', cvssScore: 4.3, cvss3Score: null, cveIds: ['CVE-2011-3389'], exploitAvailable: false, pluginOutput: null },
+      ],
+    },
+  ],
+};
+
+// ── Mock Nuclei scan results ──────────────────────────────
+
+const NUCLEI_PARSED = {
+  findings: [
+    { templateId: 'CVE-2021-44228', name: 'Apache Log4j RCE (Log4Shell)', severity: 'critical', tags: ['cve', 'rce', 'log4j'], cveIds: ['CVE-2021-44228'], cvssScore: 10.0, host: 'https://10.10.2.10', ip: '10.10.2.10', matchedAt: 'https://10.10.2.10:443/api/v1/auth', timestamp: daysAgo(8), extractedResults: [], curlCommand: null },
+    { templateId: 'CVE-2021-44228', name: 'Apache Log4j RCE (Log4Shell)', severity: 'critical', tags: ['cve', 'rce', 'log4j'], cveIds: ['CVE-2021-44228'], cvssScore: 10.0, host: 'http://10.10.2.30:8080', ip: '10.10.2.30', matchedAt: 'http://10.10.2.30:8080/j_acegi_security_check', timestamp: daysAgo(8), extractedResults: [], curlCommand: null },
+    { templateId: 'CVE-2022-22965', name: 'Spring4Shell Remote Code Execution', severity: 'critical', tags: ['cve', 'rce', 'spring'], cveIds: ['CVE-2022-22965'], cvssScore: 9.8, host: 'https://10.10.2.10', ip: '10.10.2.10', matchedAt: 'https://10.10.2.10/app/login', timestamp: daysAgo(8), extractedResults: [], curlCommand: null },
+    { templateId: 'CVE-2021-42013', name: 'Apache HTTP Server Path Traversal', severity: 'high', tags: ['cve', 'lfi', 'apache'], cveIds: ['CVE-2021-42013'], cvssScore: 9.8, host: 'http://10.10.2.11', ip: '10.10.2.11', matchedAt: 'http://10.10.2.11/cgi-bin/.%2e/.%2e/etc/passwd', timestamp: daysAgo(8), extractedResults: ['root:x:0:0:root:/root:/bin/bash'], curlCommand: null },
+    { templateId: 'default-login-jenkins', name: 'Jenkins Default Admin Credentials', severity: 'high', tags: ['default-login', 'jenkins'], cveIds: [], cvssScore: null, host: 'http://10.10.2.30:8080', ip: '10.10.2.30', matchedAt: 'http://10.10.2.30:8080/login', timestamp: daysAgo(8), extractedResults: ['admin:admin'], curlCommand: null },
+    { templateId: 'exposed-panels-jenkins', name: 'Jenkins Dashboard Exposed', severity: 'medium', tags: ['exposure', 'jenkins'], cveIds: [], cvssScore: null, host: 'http://10.10.2.30:8080', ip: '10.10.2.30', matchedAt: 'http://10.10.2.30:8080/', timestamp: daysAgo(8), extractedResults: [], curlCommand: null },
+    { templateId: 'http-missing-security-headers', name: 'Missing Security Headers', severity: 'info', tags: ['headers', 'generic'], cveIds: [], cvssScore: null, host: 'https://10.10.2.10', ip: '10.10.2.10', matchedAt: 'https://10.10.2.10/', timestamp: daysAgo(8), extractedResults: [], curlCommand: null },
+  ],
+};
+
+// ── Mock SharpHound collection results ───────────────────
+
+const SHARPHOUND_PARSED = {
+  collectedAt: daysAgo(15),
+  domain:      'CORP.LOCAL',
+  version:     5,
+  users: [
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1103', name: 'JSMITH@CORP.LOCAL',         domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(1),  pwdLastSet: daysAgo(45),  hasSPN: false, adminCount: false, memberOf: ['S-1-5-21-3623811015-3361044348-30300820-1104'] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1105', name: 'MTHOMAS@CORP.LOCAL',        domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(3),  pwdLastSet: daysAgo(90),  hasSPN: false, adminCount: false, memberOf: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1106', name: 'CBROWN@CORP.LOCAL',         domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(7),  pwdLastSet: daysAgo(30),  hasSPN: false, adminCount: false, memberOf: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-500',  name: 'ADMINISTRATOR@CORP.LOCAL',  domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(2),  pwdLastSet: daysAgo(180), hasSPN: false, adminCount: true,  memberOf: ['S-1-5-21-3623811015-3361044348-30300820-512'] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1108', name: 'SVC_JENKINS@CORP.LOCAL',    domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(1),  pwdLastSet: daysAgo(365), hasSPN: true,  adminCount: false, memberOf: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1109', name: 'SVC_SQL@CORP.LOCAL',        domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(1),  pwdLastSet: daysAgo(365), hasSPN: true,  adminCount: false, memberOf: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1110', name: 'SVC_BACKUP@CORP.LOCAL',     domain: 'CORP.LOCAL', enabled: true,  lastLogon: daysAgo(14), pwdLastSet: daysAgo(730), hasSPN: true,  adminCount: false, memberOf: ['S-1-5-21-3623811015-3361044348-30300820-512'] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1107', name: 'RLEE@CORP.LOCAL',           domain: 'CORP.LOCAL', enabled: false, lastLogon: daysAgo(60), pwdLastSet: daysAgo(200), hasSPN: false, adminCount: false, memberOf: [] },
+  ],
+  computers: [
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1001$', name: 'DC01.CORP.LOCAL',     domain: 'CORP.LOCAL', enabled: true,  os: 'Windows Server 2019 Standard', unconstrainedDelegation: true,  localAdmins: ['S-1-5-21-3623811015-3361044348-30300820-512'], sessions: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1002$', name: 'DC02.CORP.LOCAL',     domain: 'CORP.LOCAL', enabled: true,  os: 'Windows Server 2019 Standard', unconstrainedDelegation: true,  localAdmins: ['S-1-5-21-3623811015-3361044348-30300820-512'], sessions: [] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1010$', name: 'FS01.CORP.LOCAL',     domain: 'CORP.LOCAL', enabled: true,  os: 'Windows Server 2016 Standard', unconstrainedDelegation: false, localAdmins: ['S-1-5-21-3623811015-3361044348-30300820-1103'], sessions: [{ userId: 'S-1-5-21-3623811015-3361044348-30300820-1103', isAdmin: false }] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1020$', name: 'WS-JSMITH.CORP.LOCAL', domain: 'CORP.LOCAL', enabled: true,  os: 'Windows 10 Enterprise',        unconstrainedDelegation: false, localAdmins: ['S-1-5-21-3623811015-3361044348-30300820-1103'], sessions: [{ userId: 'S-1-5-21-3623811015-3361044348-30300820-1103', isAdmin: true }] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1030$', name: 'APP01.CORP.LOCAL',    domain: 'CORP.LOCAL', enabled: true,  os: 'Windows Server 2016 Standard', unconstrainedDelegation: false, localAdmins: [], sessions: [] },
+  ],
+  groups: [
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-512',  name: 'DOMAIN ADMINS@CORP.LOCAL',      domain: 'CORP.LOCAL', members: [{ objectId: 'S-1-5-21-3623811015-3361044348-30300820-500', objectType: 'User' }, { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1110', objectType: 'User' }] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-513',  name: 'DOMAIN USERS@CORP.LOCAL',       domain: 'CORP.LOCAL', members: [{ objectId: 'S-1-5-21-3623811015-3361044348-30300820-1103', objectType: 'User' }, { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1105', objectType: 'User' }, { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1106', objectType: 'User' }] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-1104', name: 'IT ADMINS@CORP.LOCAL',          domain: 'CORP.LOCAL', members: [{ objectId: 'S-1-5-21-3623811015-3361044348-30300820-1103', objectType: 'User' }] },
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820-519',  name: 'ENTERPRISE ADMINS@CORP.LOCAL',  domain: 'CORP.LOCAL', members: [{ objectId: 'S-1-5-21-3623811015-3361044348-30300820-500', objectType: 'User' }] },
+  ],
+  domains: [
+    { objectId: 'S-1-5-21-3623811015-3361044348-30300820', name: 'CORP.LOCAL', trusts: [{ targetDomain: 'CHILD.CORP.LOCAL', trustType: 'ParentChild', trustDirection: 'Bidirectional', isTransitive: true }] },
+  ],
+  gpos: [
+    { objectId: '{31B2F340-016D-11D2-945F-00C04FB984F9}', name: 'DEFAULT DOMAIN POLICY',             guid: '31B2F340-016D-11D2-945F-00C04FB984F9', domain: 'CORP.LOCAL' },
+    { objectId: '{6AC1786C-016F-11D2-945F-00C04FB984F9}', name: 'DEFAULT DOMAIN CONTROLLERS POLICY', guid: '6AC1786C-016F-11D2-945F-00C04FB984F9', domain: 'CORP.LOCAL' },
+    { objectId: '{AA4BE5D5-1234-5678-ABCD-1234567890AB}', name: 'SERVER HARDENING POLICY',           guid: 'AA4BE5D5-1234-5678-ABCD-1234567890AB', domain: 'CORP.LOCAL' },
+  ],
+  aces: [
+    { principalSid: 'S-1-5-21-3623811015-3361044348-30300820-1110', principalType: 'User',  rightName: 'DCSync',     objectSid: 'S-1-5-21-3623811015-3361044348-30300820', objectType: 'Domain',   isInherited: false },
+    { principalSid: 'S-1-5-21-3623811015-3361044348-30300820-1103', principalType: 'User',  rightName: 'GenericAll', objectSid: 'S-1-5-21-3623811015-3361044348-30300820-1010$', objectType: 'Computer', isInherited: false },
+  ],
+  cas: [
+    { objectId: 'corp-DC01-CA', name: 'corp-DC01-CA', domain: 'CORP.LOCAL', dnsName: 'DC01.corp.local', certTemplates: ['User', 'Machine', 'WebServer', 'DomainController', 'SubCA'] },
+  ],
+  ous: [
+    { objectId: 'OU=Domain Controllers,DC=corp,DC=local', name: 'Domain Controllers', domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000001', properties: {} },
+    { objectId: 'OU=Servers,DC=corp,DC=local',            name: 'Servers',            domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000002', properties: {} },
+    { objectId: 'OU=Workstations,DC=corp,DC=local',       name: 'Workstations',       domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000003', properties: {} },
+    { objectId: 'OU=Users,DC=corp,DC=local',              name: 'Users',              domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000004', properties: {} },
+    { objectId: 'OU=Service Accounts,DC=corp,DC=local',   name: 'Service Accounts',   domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000005', properties: {} },
+    { objectId: 'OU=IT,OU=Users,DC=corp,DC=local',        name: 'IT',                 domain: 'CORP.LOCAL', guid: '2B9A51B1-1111-1111-1111-000000000006', properties: {} },
+  ],
+};
+
 export const mockImports = {
   [ENG_ID]: [
     {
@@ -454,6 +556,44 @@ export const mockImports = {
         vulnCount:    METASPLOIT_PARSED.vulns.length,
         credCount:    METASPLOIT_PARSED.credentials.length,
         sessionCount: METASPLOIT_PARSED.sessions.length,
+      },
+    },
+    {
+      id:         'mock-import-nessus-01',
+      importType: 'nessus',
+      fileName:   'corp_vuln_scan_day10.nessus',
+      importedAt: daysAgo(10),
+      parsed:     NESSUS_PARSED,
+      summary: {
+        hostCount:     NESSUS_PARSED.hosts.length,
+        findingCount:  NESSUS_PARSED.hosts.reduce((n, h) => n + h.findings.length, 0),
+        criticalCount: NESSUS_PARSED.hosts.reduce((n, h) => n + h.findings.filter(f => f.severity === 4).length, 0),
+        highCount:     NESSUS_PARSED.hosts.reduce((n, h) => n + h.findings.filter(f => f.severity === 3).length, 0),
+      },
+    },
+    {
+      id:         'mock-import-nuclei-01',
+      importType: 'nuclei',
+      fileName:   'corp_web_nuclei_day8.jsonl',
+      importedAt: daysAgo(8),
+      parsed:     NUCLEI_PARSED,
+      summary: {
+        findingCount:  NUCLEI_PARSED.findings.length,
+        criticalCount: NUCLEI_PARSED.findings.filter(f => f.severity === 'critical').length,
+        highCount:     NUCLEI_PARSED.findings.filter(f => f.severity === 'high').length,
+      },
+    },
+    {
+      id:         'mock-import-sharphound-01',
+      importType: 'sharphound',
+      fileName:   'CORP_BloodHound_20240315.zip',
+      importedAt: daysAgo(15),
+      parsed:     SHARPHOUND_PARSED,
+      summary: {
+        computerCount: SHARPHOUND_PARSED.computers.length,
+        userCount:     SHARPHOUND_PARSED.users.length,
+        groupCount:    SHARPHOUND_PARSED.groups.length,
+        domainCount:   SHARPHOUND_PARSED.domains.length,
       },
     },
   ],
@@ -603,6 +743,103 @@ export const mockSnapshots = {
       14),
 
     // ── last (WEB01) ──────────────────────────────────────
+    // ── AD Domain survey (DC01) ───────────────────────────
+    snap('mock-snap-addomain-dc01', H.DC01, 'addomain', 'windows',
+      'Forest                  : corp.local\n' +
+      'DomainSID               : S-1-5-21-3623811015-3361044348-30300820\n' +
+      'NetBIOSName             : CORP\n' +
+      'DomainMode              : Windows2016Domain\n' +
+      'PDCEmulator             : DC01.corp.local\n' +
+      'RIDMaster               : DC01.corp.local\n' +
+      'InfrastructureMaster    : DC01.corp.local\n' +
+      'ParentDomain            :\n' +
+      'ChildDomains            : {child.corp.local}\n' +
+      'Forest                  : corp.local\n' +
+      'ForestMode              : Windows2016Forest\n' +
+      'GlobalCatalogs          : {DC01.corp.local, DC02.corp.local}\n' +
+      'Sites                   : {Default-First-Site-Name}\n' +
+      'UPNSuffixes             : {corp.local, corp-ext.com}',
+      15),
+
+    snap('mock-snap-addc-dc01', H.DC01, 'addomaincontrollers', 'windows',
+      'DefaultPartition    : DC=corp,DC=local\n' +
+      'Domain              : corp.local\n' +
+      'Enabled             : True\n' +
+      'Forest              : corp.local\n' +
+      'HostName            : DC01.corp.local\n' +
+      'IPAddress           : 10.10.1.5\n' +
+      'IsGlobalCatalog     : True\n' +
+      'IsReadOnly          : False\n' +
+      'Name                : DC01\n' +
+      'OperatingSystem     : Windows Server 2019 Standard\n' +
+      'OperationMasterRoles: {SchemaMaster, DomainNamingMaster, PDCEmulator, RIDMaster, InfrastructureMaster}\n' +
+      'Site                : Default-First-Site-Name\n' +
+      '\n' +
+      'DefaultPartition    : DC=corp,DC=local\n' +
+      'Domain              : corp.local\n' +
+      'Enabled             : True\n' +
+      'Forest              : corp.local\n' +
+      'HostName            : DC02.corp.local\n' +
+      'IPAddress           : 10.10.1.6\n' +
+      'IsGlobalCatalog     : True\n' +
+      'IsReadOnly          : False\n' +
+      'Name                : DC02\n' +
+      'OperatingSystem     : Windows Server 2019 Standard\n' +
+      'OperationMasterRoles: {}\n' +
+      'Site                : Default-First-Site-Name',
+      15),
+
+    snap('mock-snap-adtrusts-dc01', H.DC01, 'adtrusts', 'windows',
+      'List of domain trusts:\n' +
+      '    0: CORP corp.local (NT 5) (Forest: 2) (Forest Tree Root) (Direct Inbound) (Direct Outbound)\n' +
+      '    1: CHILD child.corp.local (NT 5) (Forest: 0) (Direct Inbound) (Direct Outbound)\n' +
+      'The command completed successfully',
+      15),
+
+    snap('mock-snap-adous-dc01', H.DC01, 'adous', 'windows',
+      'DistinguishedName    : OU=Domain Controllers,DC=corp,DC=local\n' +
+      'Name                 : Domain Controllers\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=Servers,DC=corp,DC=local\n' +
+      'Name                 : Servers\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=Workstations,DC=corp,DC=local\n' +
+      'Name                 : Workstations\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=Users,DC=corp,DC=local\n' +
+      'Name                 : Users\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=Service Accounts,DC=corp,DC=local\n' +
+      'Name                 : Service Accounts\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=IT,OU=Users,DC=corp,DC=local\n' +
+      'Name                 : IT\n' +
+      'ObjectClass          : organizationalUnit\n' +
+      '\n' +
+      'DistinguishedName    : OU=Finance,OU=Users,DC=corp,DC=local\n' +
+      'Name                 : Finance\n' +
+      'ObjectClass          : organizationalUnit',
+      15),
+
+    snap('mock-snap-adcs-dc01', H.DC01, 'adcs', 'windows',
+      'Entry 0: (Local)\n' +
+      '  Name: "corp-DC01-CA"\n' +
+      '  Organization: "CORP"\n' +
+      '  Config: "DC01.corp.local\\corp-DC01-CA"\n' +
+      '  Server: "DC01.corp.local"\n' +
+      '  Authority: "corp-DC01-CA"\n' +
+      '  Sanitized Name: "corp-DC01-CA"\n' +
+      '  Short Name: "corp-DC01-CA"\n' +
+      '  Flags: "1"\n' +
+      '  Web Enrollment Servers: "https://DC01.corp.local/certsrv"\n' +
+      'CertUtil: -CA command completed successfully.',
+      15),
+
     snap('mock-snap-last-web01', H.WEB01, 'lastlog', 'linux',
       lastLog([
         ['jsmith',   'pts/0', '10.10.2.30', '14:22', '03:10'],

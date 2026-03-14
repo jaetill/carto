@@ -5,6 +5,7 @@ import { detectOS, detectCommand,
          parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
          parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
+         parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS,
          diffSnapshots } from '../data/parsers.js';
 
 export function renderHost(engagementId, hostId, data, snapshots, onBack) {
@@ -346,7 +347,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
     const hint = document.createElement('p');
     hint.className = 'text-xs text-slate-400 mb-3';
-    hint.textContent = 'Supports: netstat, ps/tasklist, ipconfig/ifconfig, uname, arp, net user, net localgroup administrators, qwinsta, /etc/passwd, /etc/shadow, last, whoami /all, sudo -l, net accounts, net share. OS and command type detected automatically.';
+    hint.textContent = 'Supports: netstat, ps/tasklist, ipconfig/ifconfig, uname, arp, net user, net localgroup administrators, qwinsta, /etc/passwd, /etc/shadow, last, whoami /all, sudo -l, net accounts, net share, Get-ADDomain/Forest, Get-ADDomainController/nltest, Get-ADTrust/nltest domain_trusts, Get-ADOrganizationalUnit/dsquery ou, certutil -CA. OS and command type detected automatically.';
     box.appendChild(hint);
 
     const textarea = document.createElement('textarea');
@@ -398,8 +399,13 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
         if (cmdType === 'lastlog')     parsed = parseLast(raw);
         if (cmdType === 'whoami')      parsed = parseWhoamiAll(raw);
         if (cmdType === 'sudol')       parsed = parseSudoL(raw);
-        if (cmdType === 'netaccounts') parsed = parseNetAccounts(raw);
-        if (cmdType === 'netshare')    parsed = parseNetShare(raw);
+        if (cmdType === 'netaccounts')        parsed = parseNetAccounts(raw);
+        if (cmdType === 'netshare')           parsed = parseNetShare(raw);
+        if (cmdType === 'addomain')           parsed = parseADDomain(raw);
+        if (cmdType === 'addomaincontrollers') parsed = parseADDomainControllers(raw);
+        if (cmdType === 'adtrusts')           parsed = parseADTrusts(raw);
+        if (cmdType === 'adous')              parsed = parseADOUs(raw);
+        if (cmdType === 'adcs')               parsed = parseADCS(raw);
       } catch (e) { console.warn('Parse error:', e); }
 
       const snap = newSnapshot({ hostId, commandType: cmdType, osFamily, rawOutput: raw, parsed });
@@ -503,7 +509,8 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack) {
 
     // One card per commandType, ordered by security relevance
     const ORDER = ['netstat','pslist','localadmins','shadow','whoami','sudol','sessions',
-                   'passwd','netaccounts','netshare','lastlog','ipconfig','uname','arp','netuser'];
+                   'passwd','netaccounts','netshare','lastlog','ipconfig','uname','arp','netuser',
+                   'addomain','addomaincontrollers','adtrusts','adous','adcs'];
     const latest = {};
     for (const snap of hostSnaps) {
       if (!latest[snap.commandType]) latest[snap.commandType] = snap;
@@ -1101,6 +1108,239 @@ function renderParsedBody(card, snap) {
     card.appendChild(table);
     return;
   }
+
+  if (snap.commandType === 'addomain') {
+    const p = snap.parsed;
+    function kvRow(table, label, value) {
+      if (value == null || value === '') return;
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const kTd = document.createElement('td');
+      kTd.className = 'py-0.5 pr-4 text-slate-500 w-48 text-xs';
+      kTd.textContent = label;
+      const vTd = document.createElement('td');
+      vTd.className = 'py-0.5 text-slate-700 font-mono text-xs';
+      vTd.textContent = Array.isArray(value) ? (value.length ? value.join(', ') : '—') : String(value);
+      tr.appendChild(kTd); tr.appendChild(vTd);
+      table.appendChild(tr);
+    }
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs';
+    kvRow(table, 'Name',                  p.name);
+    kvRow(table, 'NetBIOS Name',           p.netbiosName);
+    kvRow(table, 'Domain SID',             p.domainSid);
+    kvRow(table, 'Forest',                 p.forest);
+    kvRow(table, 'Domain Mode',            p.domainMode);
+    kvRow(table, 'Forest Mode',            p.forestMode);
+    kvRow(table, 'PDC Emulator',           p.pdcEmulator);
+    kvRow(table, 'RID Master',             p.ridMaster);
+    kvRow(table, 'Schema Master',          p.schemaMaster);
+    kvRow(table, 'Domain Naming Master',   p.domainNamingMaster);
+    kvRow(table, 'Infrastructure Master',  p.infrastructureMaster);
+    if (p.childDomains?.length)    kvRow(table, 'Child Domains',    p.childDomains);
+    if (p.globalCatalogs?.length)  kvRow(table, 'Global Catalogs',  p.globalCatalogs);
+    if (p.sites?.length)           kvRow(table, 'Sites',            p.sites);
+    if (p.upnSuffixes?.length)     kvRow(table, 'UPN Suffixes',     p.upnSuffixes);
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'addomaincontrollers') {
+    const dcs = snap.parsed.domainControllers || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2';
+    label.textContent = `Domain Controllers (${dcs.length})`;
+    card.appendChild(label);
+    dcs.forEach(dc => {
+      const dcCard = document.createElement('div');
+      dcCard.className = 'border border-slate-100 rounded-lg px-3 py-2 mb-2 bg-slate-50';
+      // Header row: name + badges
+      const hdr = document.createElement('div');
+      hdr.className = 'flex items-center gap-2 mb-1 flex-wrap';
+      const namePill = document.createElement('span');
+      namePill.className = 'text-xs font-mono font-semibold text-slate-700';
+      namePill.textContent = dc.hostname ?? dc.name;
+      hdr.appendChild(namePill);
+      if (dc.isGlobalCatalog) {
+        const gcBadge = document.createElement('span');
+        gcBadge.className = 'text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold';
+        gcBadge.textContent = 'GC';
+        hdr.appendChild(gcBadge);
+      }
+      if (dc.isReadOnly) {
+        const roBadge = document.createElement('span');
+        roBadge.className = 'text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-semibold';
+        roBadge.textContent = 'RODC';
+        hdr.appendChild(roBadge);
+      }
+      dcCard.appendChild(hdr);
+      // Detail rows
+      const meta = [];
+      if (dc.ip)     meta.push(['IP',   dc.ip]);
+      if (dc.domain) meta.push(['Domain', dc.domain]);
+      if (dc.site)   meta.push(['Site', dc.site]);
+      if (dc.os)     meta.push(['OS',   dc.os]);
+      meta.forEach(([k, v]) => {
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 text-xs';
+        const kEl = document.createElement('span');
+        kEl.className = 'text-slate-400 w-14 flex-shrink-0';
+        kEl.textContent = k;
+        const vEl = document.createElement('span');
+        vEl.className = 'text-slate-600 font-mono';
+        vEl.textContent = v;
+        row.appendChild(kEl); row.appendChild(vEl);
+        dcCard.appendChild(row);
+      });
+      if (dc.roles?.length) {
+        const rolesRow = document.createElement('div');
+        rolesRow.className = 'flex gap-1 flex-wrap mt-1';
+        dc.roles.forEach(r => {
+          const pill = document.createElement('span');
+          pill.className = 'text-xs bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-mono';
+          pill.textContent = r;
+          rolesRow.appendChild(pill);
+        });
+        dcCard.appendChild(rolesRow);
+      }
+      card.appendChild(dcCard);
+    });
+    return;
+  }
+
+  if (snap.commandType === 'adtrusts') {
+    const trusts = snap.parsed.trusts || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Domain Trusts (${trusts.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs';
+    const thead = document.createElement('thead');
+    const hr = document.createElement('tr');
+    ['Target', 'Direction', 'Type', 'Transitive', 'Forest'].forEach(h => {
+      const th = document.createElement('th');
+      th.className = 'text-left py-0.5 pr-3 text-slate-400 font-medium text-xs';
+      th.textContent = h;
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = document.createElement('tbody');
+    trusts.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      // Target
+      const tdTarget = document.createElement('td');
+      tdTarget.className = 'py-0.5 pr-3 font-mono text-slate-700';
+      tdTarget.textContent = t.targetDomain;
+      // Direction badge
+      const tdDir = document.createElement('td');
+      tdDir.className = 'py-0.5 pr-3';
+      const dirBadge = document.createElement('span');
+      const dirColor = t.direction === 'BiDirectional' ? 'bg-green-100 text-green-700'
+                     : t.direction === 'Inbound'       ? 'bg-blue-100 text-blue-700'
+                     : t.direction === 'Outbound'      ? 'bg-amber-100 text-amber-700'
+                     : 'bg-slate-100 text-slate-600';
+      dirBadge.className = `text-xs px-1.5 py-0.5 rounded font-semibold ${dirColor}`;
+      dirBadge.textContent = t.direction;
+      tdDir.appendChild(dirBadge);
+      // Type
+      const tdType = document.createElement('td');
+      tdType.className = 'py-0.5 pr-3 text-slate-500';
+      tdType.textContent = t.trustType ?? '—';
+      // Transitive
+      const tdTrans = document.createElement('td');
+      tdTrans.className = `py-0.5 pr-3 ${t.isTransitive ? 'text-slate-600' : 'text-amber-700'}`;
+      tdTrans.textContent = t.isTransitive ? 'Yes' : 'No';
+      // Forest
+      const tdForest = document.createElement('td');
+      tdForest.className = `py-0.5 ${t.isForest ? 'text-indigo-600' : 'text-slate-400'}`;
+      tdForest.textContent = t.isForest ? 'Yes' : 'No';
+      [tdTarget, tdDir, tdType, tdTrans, tdForest].forEach(td => tr.appendChild(td));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'adous') {
+    const ous = snap.parsed.ous || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Organizational Units (${ous.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-full text-xs';
+    ous.slice(0, 20).forEach(ou => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const nameTd = document.createElement('td');
+      nameTd.className = 'py-0.5 pr-4 text-slate-700 font-semibold w-40 truncate';
+      nameTd.textContent = ou.name;
+      const dnTd = document.createElement('td');
+      dnTd.className = 'py-0.5 text-slate-500 font-mono truncate max-w-xs';
+      dnTd.textContent = ou.distinguishedName;
+      tr.appendChild(nameTd); tr.appendChild(dnTd);
+      table.appendChild(tr);
+    });
+    if (ous.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${ous.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'adcs') {
+    const cas = snap.parsed.cas || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2';
+    label.textContent = `Certificate Authorities (${cas.length})`;
+    card.appendChild(label);
+    cas.forEach(ca => {
+      const caCard = document.createElement('div');
+      caCard.className = 'border border-slate-100 rounded-lg px-3 py-2 mb-2 bg-slate-50';
+      const nameEl = document.createElement('p');
+      nameEl.className = 'text-xs font-semibold text-slate-700 font-mono mb-1';
+      nameEl.textContent = ca.name;
+      caCard.appendChild(nameEl);
+      const meta = [];
+      if (ca.server)        meta.push(['Server', ca.server]);
+      if (ca.config)        meta.push(['Config', ca.config]);
+      if (ca.sanitizedName) meta.push(['Sanitized', ca.sanitizedName]);
+      meta.forEach(([k, v]) => {
+        const row = document.createElement('div');
+        row.className = 'flex gap-2 text-xs';
+        const kEl = document.createElement('span');
+        kEl.className = 'text-slate-400 w-16 flex-shrink-0';
+        kEl.textContent = k;
+        const vEl = document.createElement('span');
+        vEl.className = 'text-slate-600 font-mono truncate';
+        vEl.textContent = v;
+        row.appendChild(kEl); row.appendChild(vEl);
+        caCard.appendChild(row);
+      });
+      if (ca.webEnrollmentServers?.length) {
+        const webRow = document.createElement('div');
+        webRow.className = 'flex gap-2 text-xs mt-1';
+        const kEl = document.createElement('span');
+        kEl.className = 'text-slate-400 w-16 flex-shrink-0';
+        kEl.textContent = 'Web Enroll';
+        const vEl = document.createElement('span');
+        vEl.className = 'text-slate-600 font-mono';
+        vEl.textContent = ca.webEnrollmentServers.join(', ');
+        webRow.appendChild(kEl); webRow.appendChild(vEl);
+        caCard.appendChild(webRow);
+      }
+      card.appendChild(caCard);
+    });
+    return;
+  }
 }
 
 function formatDiffItems(type, items) {
@@ -1113,6 +1353,10 @@ function formatDiffItems(type, items) {
   if (type === 'passwd')      return items.slice(0, 3).map(u => u.username).join(', ');
   if (type === 'shadow')      return items.slice(0, 3).map(e => e.username).join(', ');
   if (type === 'lastlog')     return items.slice(0, 3).map(e => e.username).join(', ');
-  if (type === 'netshare')    return items.slice(0, 3).map(s => s.name).join(', ');
+  if (type === 'netshare')           return items.slice(0, 3).map(s => s.name).join(', ');
+  if (type === 'addomaincontrollers') return items.slice(0, 3).map(dc => dc.hostname ?? dc.name).join(', ');
+  if (type === 'adtrusts')           return items.slice(0, 3).map(t => t.targetDomain).join(', ');
+  if (type === 'adous')              return items.slice(0, 3).map(ou => ou.name).join(', ');
+  if (type === 'adcs')               return items.slice(0, 3).map(ca => ca.name).join(', ');
   return '';
 }

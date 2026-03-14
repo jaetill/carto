@@ -3,7 +3,8 @@ import { DEBUG_MODE } from '../config.js';
 import { mockEngagements, mockEngagementData, mockSnapshots, mockImports, MOCK_ENG_ID } from './mockScenario.js';
 import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
-         parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare } from './parsers.js';
+         parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
+         parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS } from './parsers.js';
 
 
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
@@ -93,8 +94,13 @@ function applyParsers(snap) {
     if (snap.commandType === 'lastlog')     parsed = parseLast(snap.rawOutput);
     if (snap.commandType === 'whoami')      parsed = parseWhoamiAll(snap.rawOutput);
     if (snap.commandType === 'sudol')       parsed = parseSudoL(snap.rawOutput);
-    if (snap.commandType === 'netaccounts') parsed = parseNetAccounts(snap.rawOutput);
-    if (snap.commandType === 'netshare')    parsed = parseNetShare(snap.rawOutput);
+    if (snap.commandType === 'netaccounts')        parsed = parseNetAccounts(snap.rawOutput);
+    if (snap.commandType === 'netshare')           parsed = parseNetShare(snap.rawOutput);
+    if (snap.commandType === 'addomain')           parsed = parseADDomain(snap.rawOutput);
+    if (snap.commandType === 'addomaincontrollers') parsed = parseADDomainControllers(snap.rawOutput);
+    if (snap.commandType === 'adtrusts')           parsed = parseADTrusts(snap.rawOutput);
+    if (snap.commandType === 'adous')              parsed = parseADOUs(snap.rawOutput);
+    if (snap.commandType === 'adcs')               parsed = parseADCS(snap.rawOutput);
   } catch (e) { console.warn('[carto] Parse error:', e); }
   return { ...snap, parsed };
 }
