@@ -42,13 +42,63 @@ function egoNetwork(topology, focalId, maxHops) {
   return { nodeIds, edgeKeys, levels };
 }
 
+// ── Ego network BFS — user as focal node ─────────────────
+// Returns { nodeIds, edgeKeys, levels, directHostIds }
+
+function egoNetworkUser(topology, userId, maxHops) {
+  const userEdgesForUser = (topology.userEdges || []).filter(ue => ue.userId === userId);
+  const directHostIds    = new Set(userEdgesForUser.map(ue => ue.hostId));
+
+  const levels  = { [userId]: 0 };
+  const nodeIds = new Set([userId]);
+  for (const hid of directHostIds) { nodeIds.add(hid); levels[hid] = 1; }
+
+  if (maxHops >= 2) {
+    const adj = {};
+    for (const edge of topology.edges) {
+      (adj[edge.source] ||= []).push({ neighbor: edge.target, edge });
+      (adj[edge.target] ||= []).push({ neighbor: edge.source, edge });
+    }
+    let frontier = [...directHostIds];
+    for (let hop = 1; hop < maxHops; hop++) {
+      const next = [];
+      for (const id of frontier) {
+        for (const { neighbor } of adj[id] || []) {
+          if (!nodeIds.has(neighbor)) {
+            nodeIds.add(neighbor);
+            levels[neighbor] = hop + 1;
+            next.push(neighbor);
+          }
+        }
+      }
+      frontier = next;
+    }
+  }
+
+  const edgeKeys = new Set();
+  for (const edge of topology.edges) {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+      edgeKeys.add(`${edge.source}→${edge.target}:${edge.port}/${edge.protocol}`);
+    }
+  }
+
+  return { nodeIds, edgeKeys, levels, directHostIds };
+}
+
 // ── Build Cytoscape elements ──────────────────────────────
 
 function buildElements(topology, focalId, maxHops, showAdmins, showSessions) {
-  const nodeMap = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
-  let visibleIds, levels, visibleEdgeKeys;
+  const nodeMap      = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
+  const isUserFocal  = !!(focalId && focalId.startsWith('user_'));
+  let visibleIds, levels, visibleEdgeKeys, directHostIds;
 
-  if (focalId) {
+  if (focalId && isUserFocal) {
+    const result = egoNetworkUser(topology, focalId, maxHops);
+    visibleIds      = result.nodeIds;
+    levels          = result.levels;
+    visibleEdgeKeys = result.edgeKeys;
+    directHostIds   = result.directHostIds;
+  } else if (focalId) {
     const result = egoNetwork(topology, focalId, maxHops);
     visibleIds      = result.nodeIds;
     levels          = result.levels;
@@ -78,8 +128,9 @@ function buildElements(topology, focalId, maxHops, showAdmins, showSessions) {
     }
   }
 
-  // Host nodes
+  // Host nodes (skip the focal user ID which lives in users, not nodes)
   for (const id of visibleIds) {
+    if (isUserFocal && id === focalId) continue;
     const node = nodeMap[id];
     if (!node) continue;
     const isFocal  = id === focalId;
@@ -124,50 +175,72 @@ function buildElements(topology, focalId, maxHops, showAdmins, showSessions) {
     });
   }
 
-  // User nodes + edges — only for the focal host (not all ego-network hosts)
-  if (focalId && (showAdmins || showSessions) && (topology.users?.length || topology.userEdges?.length)) {
+  // User nodes + edges
+  if (topology.users?.length || topology.userEdges?.length) {
     const userMap = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
 
-    // Only show users connected to the focal host, filtered by relationship type
-    const visibleUserEdges = (topology.userEdges || []).filter(ue => {
-      if (ue.hostId !== focalId) return false;
-      if (ue.type === 'IS_LOCAL_ADMIN' && !showAdmins) return false;
-      if (ue.type === 'HAS_SESSION' && !showSessions) return false;
-      return true;
-    });
-
-    // Collect user IDs that have at least one visible edge
-    const visibleUserIds = new Set(visibleUserEdges.map(ue => ue.userId));
-
-    for (const uid of visibleUserIds) {
-      const u = userMap[uid];
-      if (!u) continue;
-      elements.push({
-        data: {
-          id:       uid,
-          label:    u.username,
-          domain:   u.domain,
-          isAdmin:  u.isAdmin,
-          type:     'user',
-        },
+    if (isUserFocal) {
+      // ── User-focal: focal user at center, show their edges to visible hosts ──
+      const u = userMap[focalId];
+      if (u) {
+        elements.push({
+          data: { id: focalId, label: u.username, domain: u.domain, isAdmin: u.isAdmin, isFocal: true, level: 0, type: 'user' },
+        });
+      }
+      // Focal user's own edges — always shown, but filtered by type toggle
+      for (const ue of topology.userEdges || []) {
+        if (ue.userId !== focalId) continue;
+        if (!visibleIds.has(ue.hostId)) continue;
+        if (ue.type === 'IS_LOCAL_ADMIN' && !showAdmins) continue;
+        if (ue.type === 'HAS_SESSION'    && !showSessions) continue;
+        const key = `${ue.userId}→${ue.hostId}:${ue.type}`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        elements.push({ data: { id: key, source: ue.userId, target: ue.hostId, type: ue.type, fromIp: ue.fromIp, label: '' } });
+      }
+      // Other users on visible hosts (optional context — gated on toggles)
+      if (showAdmins || showSessions) {
+        const otherUserEdges = (topology.userEdges || []).filter(ue => {
+          if (ue.userId === focalId) return false;
+          if (!visibleIds.has(ue.hostId)) return false;
+          if (ue.type === 'IS_LOCAL_ADMIN' && !showAdmins) return false;
+          if (ue.type === 'HAS_SESSION'    && !showSessions) return false;
+          return true;
+        });
+        const otherUserIds = new Set(otherUserEdges.map(ue => ue.userId));
+        for (const uid of otherUserIds) {
+          const ou = userMap[uid];
+          if (!ou) continue;
+          elements.push({ data: { id: uid, label: ou.username, domain: ou.domain, isAdmin: ou.isAdmin, type: 'user' } });
+        }
+        for (const ue of otherUserEdges) {
+          const key = `${ue.userId}→${ue.hostId}:${ue.type}`;
+          if (edgeSeen.has(key)) continue;
+          edgeSeen.add(key);
+          elements.push({ data: { id: key, source: ue.userId, target: ue.hostId, type: ue.type, fromIp: ue.fromIp, label: '' } });
+        }
+      }
+    } else if (focalId && (showAdmins || showSessions)) {
+      // ── Host-focal: show users connected to the focal host ──
+      const visibleUserEdges = (topology.userEdges || []).filter(ue => {
+        if (ue.hostId !== focalId) return false;
+        if (ue.type === 'IS_LOCAL_ADMIN' && !showAdmins) return false;
+        if (ue.type === 'HAS_SESSION'    && !showSessions) return false;
+        return true;
       });
-    }
-
-    for (const ue of visibleUserEdges) {
-      if (!visibleUserIds.has(ue.userId)) continue;
-      const key = `${ue.userId}→${ue.hostId}:${ue.type}`;
-      if (edgeSeen.has(key)) continue;
-      edgeSeen.add(key);
-      elements.push({
-        data: {
-          id:     key,
-          source: ue.userId,
-          target: ue.hostId,
-          type:   ue.type,
-          fromIp: ue.fromIp,
-          label:  '',
-        },
-      });
+      const visibleUserIds = new Set(visibleUserEdges.map(ue => ue.userId));
+      for (const uid of visibleUserIds) {
+        const u = userMap[uid];
+        if (!u) continue;
+        elements.push({ data: { id: uid, label: u.username, domain: u.domain, isAdmin: u.isAdmin, type: 'user' } });
+      }
+      for (const ue of visibleUserEdges) {
+        if (!visibleUserIds.has(ue.userId)) continue;
+        const key = `${ue.userId}→${ue.hostId}:${ue.type}`;
+        if (edgeSeen.has(key)) continue;
+        edgeSeen.add(key);
+        elements.push({ data: { id: key, source: ue.userId, target: ue.hostId, type: ue.type, fromIp: ue.fromIp, label: '' } });
+      }
     }
   }
 
@@ -233,11 +306,22 @@ const stylesheet = [
       'border-width':     1.5,
       'label':            'data(label)',
       'font-size':        '9px',
+      'font-weight':      (ele) => ele.data('isFocal') ? 'bold' : 'normal',
       'color':            '#1e293b',
       'text-valign':      'bottom',
       'text-halign':      'center',
       'text-margin-y':    4,
       'shape':            'diamond',
+    },
+  },
+  {
+    selector: 'node[type="user"][?isFocal]',
+    style: {
+      'width':        40,
+      'height':       40,
+      'border-width': 4,
+      'border-color': '#ffffff',
+      'font-size':    '10px',
     },
   },
   {
@@ -312,10 +396,11 @@ function makeLayout(focalId, levels) {
       name:       'concentric',
       concentric: (node) => {
         if (node.data('type') === 'subnet') return 0;
-        // User nodes go in the outermost ring, just outside the hop rings
-        if (node.data('type') === 'user') return 1;
-        // Focal host = innermost; each hop ring moves outward
-        const l = levels[node.data('id')] ?? maxLevel;
+        const id = node.data('id');
+        // Non-focal user nodes sit in the outermost ring
+        if (node.data('type') === 'user' && id !== focalId) return 1;
+        // Focal node (host or user) = innermost; each hop ring moves outward
+        const l = levels[id] ?? maxLevel;
         return maxLevel - l + 2;
       },
       levelWidth:  () => 1,
@@ -354,8 +439,9 @@ function showTooltip(canvas, ele) {
     `;
   } else if (d.type === 'user') {
     tip.innerHTML = `
-      <p class="font-semibold">${d.domain ? `${d.domain}\\` : ''}${d.username}</p>
+      <p class="font-semibold">${d.domain ? `${d.domain}\\` : ''}${d.label}</p>
       ${d.isAdmin ? '<p class="text-red-400 font-semibold text-xs mt-0.5">Local Admin</p>' : ''}
+      ${d.isFocal ? '' : '<p class="text-violet-400 mt-1 text-xs">Click to focus</p>'}
     `;
   } else if (d.type === 'connection') {
     tip.innerHTML = `
@@ -403,9 +489,12 @@ export async function renderTopology(engagementId, container, onHostClick) {
     const controls = document.createElement('div');
     controls.className = 'flex items-center gap-3 mb-3 flex-wrap';
 
+    const isUserFocal = !!(focalId && focalId.startsWith('user_'));
+    const userMap     = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
+
     // Host picker
     const pickerWrap = document.createElement('div');
-    pickerWrap.className = 'flex items-center gap-2';
+    pickerWrap.className = 'flex items-center gap-2 flex-wrap';
     const pickerLabel = document.createElement('span');
     pickerLabel.className = 'text-xs text-slate-500 font-medium';
     pickerLabel.textContent = 'Focus:';
@@ -419,12 +508,31 @@ export async function renderTopology(engagementId, container, onHostClick) {
       const opt = document.createElement('option');
       opt.value = node.id;
       opt.textContent = `${node.hostname || node.ip}${node.ip && node.hostname ? ` (${node.ip})` : ''}`;
-      opt.selected = node.id === focalId;
+      opt.selected = !isUserFocal && node.id === focalId;
       picker.appendChild(opt);
     }
     picker.onchange = () => { focalId = picker.value || null; draw(); };
     pickerWrap.appendChild(pickerLabel);
     pickerWrap.appendChild(picker);
+
+    // User focal badge — shown instead of a picker selection when a user is focal
+    if (isUserFocal) {
+      const focalUser = userMap[focalId];
+      if (focalUser) {
+        const badge = document.createElement('span');
+        badge.className = 'inline-flex items-center gap-1.5 text-xs bg-violet-100 text-violet-800 px-2 py-1 rounded-full font-medium';
+        badge.innerHTML = `<span class="inline-block w-2 h-2 rotate-45 bg-violet-600 flex-shrink-0"></span>${focalUser.domain ? `${focalUser.domain}\\` : ''}${focalUser.username}`;
+        const clearBtn = document.createElement('button');
+        clearBtn.type = 'button';
+        clearBtn.className = 'ml-0.5 text-violet-500 hover:text-violet-800 font-bold leading-none';
+        clearBtn.textContent = '×';
+        clearBtn.title = 'Clear user focus';
+        clearBtn.onclick = () => { focalId = null; draw(); };
+        badge.appendChild(clearBtn);
+        pickerWrap.appendChild(badge);
+      }
+    }
+
     controls.appendChild(pickerWrap);
 
     // Hop toggle (only when focused)
@@ -446,8 +554,11 @@ export async function renderTopology(engagementId, container, onHostClick) {
       controls.appendChild(hopWrap);
     }
 
-    // Relationship toggles (only when focused and users exist)
-    if (focalId && topology.userEdges?.some(ue => ue.hostId === focalId)) {
+    // Relationship toggles — show when focused and focal has relevant user edges
+    const hasFocalUserEdges = isUserFocal
+      ? topology.userEdges?.some(ue => ue.userId === focalId)
+      : focalId && topology.userEdges?.some(ue => ue.hostId === focalId);
+    if (hasFocalUserEdges) {
       const relWrap = document.createElement('div');
       relWrap.className = 'flex items-center gap-1';
       const relLabel = document.createElement('span');
@@ -487,7 +598,7 @@ export async function renderTopology(engagementId, container, onHostClick) {
     container.appendChild(controls);
 
     // ── Empty state ───────────────────────────────────────
-    if (!topology.nodes.length || (!topology.edges.length && !focalId)) {
+    if (!topology.nodes.length || (!topology.edges.length && !focalId && !isUserFocal)) {
       const empty = document.createElement('p');
       empty.className = 'text-slate-400 text-sm italic py-8 text-center';
       empty.textContent = topology.nodes.length
@@ -503,9 +614,11 @@ export async function renderTopology(engagementId, container, onHostClick) {
     container.appendChild(canvas);
 
     // Compute ego network for layout
-    const { levels } = focalId
-      ? egoNetwork(topology, focalId, hopCount)
-      : { levels: {} };
+    const { levels } = isUserFocal
+      ? egoNetworkUser(topology, focalId, hopCount)
+      : focalId
+        ? egoNetwork(topology, focalId, hopCount)
+        : { levels: {} };
 
     const elements = buildElements(topology, focalId, hopCount, showAdmins, showSessions);
 
@@ -525,8 +638,8 @@ export async function renderTopology(engagementId, container, onHostClick) {
     // Click host → refocus
     cy.on('tap', 'node[type="host"]', (e) => {
       const id = e.target.data('id');
-      if (focalId === id) {
-        // Second click on focal → navigate to host detail
+      if (!isUserFocal && focalId === id) {
+        // Second click on focal host → navigate to host detail
         if (onHostClick) onHostClick(id);
       } else {
         focalId = id;
@@ -535,16 +648,39 @@ export async function renderTopology(engagementId, container, onHostClick) {
       }
     });
 
+    // Click user → set as focal
+    cy.on('tap', 'node[type="user"]', (e) => {
+      const id = e.target.data('id');
+      if (isUserFocal && focalId === id) {
+        // Second click on focal user → clear focus
+        focalId = null;
+        draw();
+      } else {
+        focalId = id;
+        picker.value = '';
+        draw();
+      }
+    });
+
     // ── Info bar ──────────────────────────────────────────
     const info = document.createElement('p');
     info.className = 'text-xs text-slate-400 mt-2';
     const visibleHostNodes = elements.filter(e => e.data.type === 'host').length;
-    const visibleUserNodes = elements.filter(e => e.data.type === 'user').length;
+    const visibleUserNodes = elements.filter(e => e.data.type === 'user' && !e.data.isFocal).length;
     const visibleEdges     = elements.filter(e => e.data.source && e.data.type === 'connection').length;
-    const userPart = visibleUserNodes ? ` · ${visibleUserNodes} user${visibleUserNodes !== 1 ? 's' : ''}` : '';
-    info.innerHTML = focalId
-      ? `Showing ${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}${userPart} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Click focused host again to open detail`
-      : `${visibleHostNodes} connected host${visibleHostNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click any host to focus`;
+    const userPart = visibleUserNodes ? ` · ${visibleUserNodes} other user${visibleUserNodes !== 1 ? 's' : ''}` : '';
+    if (isUserFocal) {
+      const adminCount   = elements.filter(e => e.data.type === 'IS_LOCAL_ADMIN').length;
+      const sessionCount = elements.filter(e => e.data.type === 'HAS_SESSION').length;
+      const parts = [];
+      if (adminCount)   parts.push(`admin on ${adminCount} host${adminCount !== 1 ? 's' : ''}`);
+      if (sessionCount) parts.push(`session on ${sessionCount} host${sessionCount !== 1 ? 's' : ''}`);
+      info.innerHTML = `${parts.join(' · ') || `${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}`}${userPart} &nbsp;·&nbsp; Click user again to clear focus`;
+    } else {
+      info.innerHTML = focalId
+        ? `Showing ${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}${userPart} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Click focused host again to open detail`
+        : `${visibleHostNodes} connected host${visibleHostNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click any host to focus · Click any user to focus`;
+    }
     container.appendChild(info);
   }
 }

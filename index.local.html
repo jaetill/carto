@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Carto</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="module" src="./src/js/app.local.js"></script>
+</head>
+<body class="h-screen flex overflow-hidden bg-slate-50">
+
+  <!-- Sidebar -->
+  <aside class="w-56 bg-slate-900 flex flex-col flex-shrink-0">
+    <div class="px-4 py-4 border-b border-slate-700 flex items-center justify-between">
+      <span class="text-white font-bold text-base tracking-tight">⬡ Carto</span>
+      <button id="new-eng-btn" class="text-slate-400 hover:text-white text-lg leading-none" title="New engagement">+</button>
+    </div>
+    <nav id="sidebar-content" class="flex-1 overflow-y-auto py-2"></nav>
+    <div class="px-4 py-3 border-t border-slate-700">
+      <span class="text-xs text-slate-500">Local mode</span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col overflow-hidden">
+    <div id="app-content" class="flex-1 overflow-y-auto p-6"></div>
+  </div>
+
+  <div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-50"></div>
+
+</body>
+</html>

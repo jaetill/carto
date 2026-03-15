@@ -6,7 +6,7 @@ import { detectOS, detectCommand,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
          parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
          parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS,
-         diffSnapshots } from '../data/parsers.js';
+         diffSnapshots, checkParseQuality } from '../data/parsers.js';
 
 export function renderHost(engagementId, hostId, data, snapshots, onBack, imports = []) {
   const container = document.getElementById('app-content');
@@ -204,6 +204,15 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
       snapHeader.appendChild(tsBadge);
       snapHeader.appendChild(delBtn);
       card.appendChild(snapHeader);
+
+      // Parse quality warning
+      const parseCheck = checkParseQuality(snap);
+      if (!parseCheck.ok) {
+        const warn = document.createElement('div');
+        warn.className = 'flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-amber-700';
+        warn.innerHTML = `<span class="flex-shrink-0">⚠</span><span><span class="font-medium">Parse warning:</span> ${parseCheck.warning}</span>`;
+        card.appendChild(warn);
+      }
 
       // Diff summary
       if (hasChanges) {
@@ -523,10 +532,14 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
       ...Object.keys(latest).filter(t => !ORDER.includes(t)),
     ];
 
+    const WIDE = new Set(['netstat','pslist','whoami','addomain','addomaincontrollers','adtrusts','adous']);
+    const grid = document.createElement('div');
+    grid.className = 'grid grid-cols-2 gap-3 items-start';
+
     for (const type of types) {
       const snap = latest[type];
       const card = document.createElement('div');
-      card.className = 'bg-white rounded-xl border border-slate-200 p-4 mb-3';
+      card.className = 'bg-white rounded-xl border border-slate-200 p-4' + (WIDE.has(type) ? ' col-span-2' : '');
 
       const cardHeader = document.createElement('div');
       cardHeader.className = 'flex items-center gap-2 mb-3';
@@ -555,6 +568,14 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
       cardHeader.appendChild(viewBtn);
       card.appendChild(cardHeader);
 
+      const parseCheck = checkParseQuality(snap);
+      if (!parseCheck.ok) {
+        const warn = document.createElement('div');
+        warn.className = 'flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-amber-700';
+        warn.innerHTML = `<span class="flex-shrink-0">⚠</span><span><span class="font-medium">Parse warning:</span> ${parseCheck.warning}</span>`;
+        card.appendChild(warn);
+      }
+
       if (snap.parsed) {
         renderParsedBody(card, snap);
       } else {
@@ -564,8 +585,9 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
         card.appendChild(na);
       }
 
-      container.appendChild(card);
+      grid.appendChild(card);
     }
+    container.appendChild(grid);
   }
 
   // ── Simulate new data (mock/demo mode only) ────────────
@@ -797,7 +819,7 @@ function renderParsedBody(card, snap) {
       label.textContent = `Established (${established.length})`;
       section.appendChild(label);
       const table = document.createElement('table');
-      table.className = 'w-full text-xs font-mono';
+      table.className = 'w-auto text-xs font-mono';
       established.slice(0, 10).forEach(c => {
         const tr = document.createElement('tr');
         tr.className = 'border-t border-slate-100';
@@ -831,7 +853,7 @@ function renderParsedBody(card, snap) {
     label.textContent = `Processes (${procs.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
+    table.className = 'w-auto text-xs font-mono';
     procs.slice(0, 15).forEach(p => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
@@ -899,8 +921,8 @@ function renderParsedBody(card, snap) {
     label.textContent = `ARP entries (${entries.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
-    entries.forEach(e => {
+    table.className = 'w-auto text-xs font-mono';
+    entries.slice(0, 20).forEach(e => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
       [e.ip, e.mac, e.type ?? '', e.iface ?? ''].forEach(val => {
@@ -911,6 +933,13 @@ function renderParsedBody(card, snap) {
       });
       table.appendChild(tr);
     });
+    if (entries.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${entries.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
     card.appendChild(table);
     return;
   }
@@ -942,7 +971,7 @@ function renderParsedBody(card, snap) {
         ['Password expires', p.passwordExpires],
       ].filter(([, v]) => v != null);
       const table = document.createElement('table');
-      table.className = 'w-full text-xs mb-2';
+      table.className = 'w-auto text-xs mb-2';
       rows.forEach(([k, v]) => {
         const tr = document.createElement('tr');
         tr.className = 'border-t border-slate-100';
@@ -1002,8 +1031,8 @@ function renderParsedBody(card, snap) {
     label.textContent = `Sessions (${sessions.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
-    sessions.forEach(s => {
+    table.className = 'w-auto text-xs font-mono';
+    sessions.slice(0, 10).forEach(s => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
       [s.sessionName ?? '—', s.username ?? '—', s.id, s.state].forEach(val => {
@@ -1014,6 +1043,13 @@ function renderParsedBody(card, snap) {
       });
       table.appendChild(tr);
     });
+    if (sessions.length > 10) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${sessions.length - 10} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
     card.appendChild(table);
     return;
   }
@@ -1028,7 +1064,7 @@ function renderParsedBody(card, snap) {
       label.textContent = `Login-capable accounts (${loginUsers.length})`;
       card.appendChild(label);
       const table = document.createElement('table');
-      table.className = 'w-full text-xs font-mono mb-2';
+      table.className = 'w-auto text-xs font-mono mb-2';
       loginUsers.forEach(u => {
         const tr = document.createElement('tr');
         tr.className = 'border-t border-slate-100';
@@ -1064,8 +1100,8 @@ function renderParsedBody(card, snap) {
       card.appendChild(warn);
     }
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
-    entries.forEach(e => {
+    table.className = 'w-auto text-xs font-mono';
+    entries.slice(0, 20).forEach(e => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
       const status = e.locked ? 'locked' : e.hasHash ? `hash:${e.hashAlgo}` : 'no hash';
@@ -1077,6 +1113,13 @@ function renderParsedBody(card, snap) {
       });
       table.appendChild(tr);
     });
+    if (entries.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${entries.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
     card.appendChild(table);
     return;
   }
@@ -1088,7 +1131,7 @@ function renderParsedBody(card, snap) {
     label.textContent = `Login history (${entries.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
+    table.className = 'w-auto text-xs font-mono';
     entries.slice(0, 15).forEach(e => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
@@ -1216,7 +1259,7 @@ function renderParsedBody(card, snap) {
       ['Computer role',       p.computerRole],
     ].filter(([, v]) => v != null);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs';
+    table.className = 'w-auto text-xs';
     rows.forEach(([k, v]) => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
@@ -1240,8 +1283,8 @@ function renderParsedBody(card, snap) {
     label.textContent = `Shares (${shares.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs font-mono';
-    shares.forEach(s => {
+    table.className = 'w-auto text-xs font-mono';
+    shares.slice(0, 15).forEach(s => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';
       const nameTd = document.createElement('td');
@@ -1256,6 +1299,13 @@ function renderParsedBody(card, snap) {
       tr.appendChild(nameTd); tr.appendChild(pathTd); tr.appendChild(remarkTd);
       table.appendChild(tr);
     });
+    if (shares.length > 15) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${shares.length - 15} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
     card.appendChild(table);
     return;
   }
@@ -1276,7 +1326,7 @@ function renderParsedBody(card, snap) {
       table.appendChild(tr);
     }
     const table = document.createElement('table');
-    table.className = 'w-full text-xs';
+    table.className = 'w-auto text-xs';
     kvRow(table, 'Name',                  p.name);
     kvRow(table, 'NetBIOS Name',           p.netbiosName);
     kvRow(table, 'Domain SID',             p.domainSid);
@@ -1366,7 +1416,7 @@ function renderParsedBody(card, snap) {
     label.textContent = `Domain Trusts (${trusts.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs';
+    table.className = 'w-auto text-xs';
     const thead = document.createElement('thead');
     const hr = document.createElement('tr');
     ['Target', 'Direction', 'Type', 'Transitive', 'Forest'].forEach(h => {
@@ -1423,7 +1473,7 @@ function renderParsedBody(card, snap) {
     label.textContent = `Organizational Units (${ous.length})`;
     card.appendChild(label);
     const table = document.createElement('table');
-    table.className = 'w-full text-xs';
+    table.className = 'w-auto text-xs';
     ous.slice(0, 20).forEach(ou => {
       const tr = document.createElement('tr');
       tr.className = 'border-t border-slate-100';

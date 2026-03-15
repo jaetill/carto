@@ -1,41 +1,16 @@
-import { Auth } from 'aws-amplify';
 import { DEBUG_MODE } from '../config.js';
+import { apiGet, apiPost } from '@carto/api';
 import { mockEngagements, mockEngagementData, mockSnapshots, mockImports, MOCK_ENG_ID } from './mockScenario.js';
 import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
          parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
          parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS } from './parsers.js';
 
+export { apiGet, apiPost };
 
-const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
-
-// ── API helpers ───────────────────────────────────────────
-
-export async function apiGet(path) {
-  const session = await Auth.currentSession();
-  const token   = session.getIdToken().getJwtToken();
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { Authorization: token },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  return res.json();
-}
-
-export async function apiPost(path, body) {
-  const session = await Auth.currentSession();
-  const token   = session.getIdToken().getJwtToken();
-  const res = await fetch(`${API_URL}${path}`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: token },
-    body:    JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Request failed: ${res.status}`);
-  }
-  return res.json();
-}
+// LOCAL_MODE: set to true by vite.config.js when building the local bundle.
+// In local mode we always use the real storage adapter even if DEBUG_MODE is on.
+const LOCAL_MODE = import.meta.env.VITE_LOCAL_MODE;
 
 // ── Engagements ───────────────────────────────────────────
 
@@ -51,7 +26,7 @@ export async function loadMockScenario() {
 }
 
 export async function loadEngagements() {
-  if (DEBUG_MODE) return loadMockScenario();
+  if (DEBUG_MODE && !LOCAL_MODE) return loadMockScenario();
   const data = await apiGet('/engagements');
   engagements = data || [];
   return engagements;

@@ -14,6 +14,8 @@ export function renderImport(engagementId, importObj, onBack) {
     renderNuciei(container, importObj, onBack);
   } else if (importObj.importType === 'sharphound') {
     renderSharpHound(container, importObj, onBack);
+  } else if (importObj.importType === 'ghostwriter') {
+    renderGhostwriter(container, importObj, onBack);
   } else {
     renderGeneric(container, importObj, onBack);
   }
@@ -664,6 +666,76 @@ function shBoolCell(value, trueLabel = 'Yes', trueClass = 'bg-green-100 text-gre
     badge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-400';
     badge.textContent = 'No';
     td.appendChild(badge);
+  }
+  return td;
+}
+
+// ── Ghostwriter oplog detail view ────────────────────────
+
+function renderGhostwriter(container, importObj, onBack) {
+  const parsed  = importObj.parsed || {};
+  const entries = (parsed.entries || []).slice()
+    .sort((a, b) => (a.startDate ?? 0) - (b.startDate ?? 0));
+
+  buildHeader(container, importObj, onBack);
+
+  const operators = new Set(entries.map(e => e.operatorName).filter(Boolean));
+  const tools     = new Set(entries.map(e => e.tool).filter(Boolean));
+
+  const dates = entries.map(e => e.startDate).filter(Boolean);
+  const dateRange = dates.length >= 2
+    ? `${new Date(Math.min(...dates)).toLocaleDateString()} – ${new Date(Math.max(...dates)).toLocaleDateString()}`
+    : dates.length === 1 ? new Date(dates[0]).toLocaleDateString() : null;
+
+  buildStatsRow(container, [
+    { label: 'Log Entries', value: entries.length },
+    { label: 'Operators',   value: operators.size },
+    { label: 'Tools',       value: tools.size },
+    ...(dateRange ? [{ label: 'Date Range', value: dateRange }] : []),
+  ]);
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'bg-white rounded-xl border border-slate-200 overflow-hidden';
+
+  tableWrap.appendChild(buildTable(
+    ['Time', 'Operator', 'Source IP', 'Dest', 'Tool', 'User Context', 'Command'],
+    entries,
+    entry => [
+      textCell(entry.startDate ? new Date(entry.startDate).toLocaleString() : '—'),
+      textCell(entry.operatorName || '—'),
+      monoCell(entry.sourceIp || '—'),
+      monoCell(entry.destHost || entry.destIp || '—'),
+      textCell(entry.tool || '—'),
+      monoCell(entry.userContext || '—'),
+      commandCell(entry.command),
+    ],
+    'No log entries recorded.'
+  ));
+
+  container.appendChild(tableWrap);
+}
+
+function commandCell(command) {
+  const td = document.createElement('td');
+  td.className = 'px-4 py-2.5 font-mono text-xs text-slate-700 max-w-xs';
+  if (!command) { td.innerHTML = '<span class="text-slate-300">—</span>'; return td; }
+  if (command.length <= 80) {
+    td.textContent = command;
+  } else {
+    const short = document.createElement('span');
+    short.textContent = command.slice(0, 80) + '…';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'ml-1 text-indigo-500 hover:underline text-xs';
+    toggle.textContent = 'more';
+    let expanded = false;
+    toggle.onclick = () => {
+      expanded = !expanded;
+      short.textContent = expanded ? command : command.slice(0, 80) + '…';
+      toggle.textContent = expanded ? 'less' : 'more';
+    };
+    td.appendChild(short);
+    td.appendChild(toggle);
   }
   return td;
 }

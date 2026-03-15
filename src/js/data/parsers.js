@@ -111,6 +111,27 @@ function extractPort(addr) {
   return m ? parseInt(m[1], 10) : null;
 }
 
+// Splits a netstat address token into { host, port }
+// Handles: 1.2.3.4:80  host:https  [::1]:443  [::1]:https
+function splitNetstatAddr(addr) {
+  if (addr.startsWith('[')) {
+    const end = addr.indexOf(']');
+    if (end === -1) return { host: addr, port: null };
+    const portStr = addr.slice(end + 2); // skip ']:'
+    return { host: addr.slice(1, end), port: portOrNum(portStr) };
+  }
+  const lastColon = addr.lastIndexOf(':');
+  if (lastColon === -1) return { host: addr, port: null };
+  return { host: addr.slice(0, lastColon), port: portOrNum(addr.slice(lastColon + 1)) };
+}
+
+// Returns a numeric port if parseable, otherwise the service name string, or null
+function portOrNum(s) {
+  if (!s || s === '*') return null;
+  const n = parseInt(s, 10);
+  return isNaN(n) ? s : n;
+}
+
 function nullIfEmpty(val) {
   return (val === '' || val === undefined) ? null : val;
 }
@@ -126,20 +147,23 @@ export function parseNetstat(raw, osFamily) {
     const trimmed = line.trim();
     if (!trimmed || /^(active|proto|tcp|udp)/i.test(trimmed) === false) continue;
 
-    // Windows: TCP    0.0.0.0:135    0.0.0.0:0    LISTENING    1234
-    // Require ip:port form in address fields to avoid misparsing Linux Recv-Q/Send-Q columns
+    // Windows: TCP    0.0.0.0:135           0.0.0.0:0             LISTENING    1234
+    //          TCP    [::1]:port            [::1]:port            ESTABLISHED
+    //          TCP    192.168.1.1:1234      hostname:https        ESTABLISHED
+    // Use \S+ to handle hostnames and service names (e.g. kubernetes:https, G3100:domain)
+    // Require colon in local address to avoid matching Linux Recv-Q/Send-Q columns
     const winMatch = trimmed.match(
-      /^(tcp|udp)v?[46]?\s+([\d.*]+:[\d*]+)\s+([\d.*]+:[\d*]+)\s+(\w+)(?:\s+(\d+))?/i
+      /^(tcp|udp)v?[46]?\s+(\S+:\S+)\s+(\S+)\s+([\w_-]+)(?:\s+(\d+))?/i
     );
     if (winMatch) {
-      const localAddr  = winMatch[2];
-      const remoteAddr = winMatch[3];
+      const localParsed  = splitNetstatAddr(winMatch[2]);
+      const remoteParsed = splitNetstatAddr(winMatch[3]);
       connections.push({
         proto:      winMatch[1].toUpperCase(),
-        localAddr,
-        localPort:  extractPort(localAddr),
-        remoteAddr,
-        remotePort: extractPort(remoteAddr),
+        localAddr:  localParsed.host,
+        localPort:  localParsed.port,
+        remoteAddr: remoteParsed.host,
+        remotePort: remoteParsed.port,
         state:      winMatch[4].toUpperCase(),
         pid:        nullIfEmpty(winMatch[5]),
       });
@@ -1616,6 +1640,158 @@ export async function parseSharpHound(arrayBuffer) {
   }
 
   return result;
+}
+
+// ── Ghostwriter oplog CSV parser ──────────────────────────
+// Input:  Ghostwriter CSV oplog export
+// Handles flexible column names across Ghostwriter versions.
+
+export function parseGhostwriter(csvString) {
+  const rows = parseCSVRows(csvString.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+  if (rows.length === 0) return { entries: [] };
+
+  const headers = rows[0].map(h => h.trim().toLowerCase().replace(/[\s_-]+/g, ''));
+
+  // Map schema field names to possible CSV column name variants
+  const ALIASES = {
+    startdate:    ['startdate', 'start', 'starttime', 'datetime', 'date'],
+    enddate:      ['enddate', 'end', 'endtime'],
+    sourceip:     ['sourceip', 'srcip', 'src', 'source'],
+    destip:       ['destip', 'dstip', 'dst', 'destinationip', 'destination'],
+    desthost:     ['desthost', 'destinationhost', 'hostname', 'host'],
+    tool:         ['tool', 'toolname'],
+    usercontext:  ['usercontext', 'user', 'context', 'username'],
+    command:      ['command', 'cmd'],
+    description:  ['description', 'desc', 'notes', 'note'],
+    output:       ['output', 'result', 'results'],
+    comments:     ['comments', 'comment'],
+    operatorname: ['operatorname', 'operator'],
+    tags:         ['tags', 'tag'],
+  };
+
+  const colIdx = Object.fromEntries(
+    Object.entries(ALIASES).map(([field, aliases]) => {
+      for (const alias of aliases) {
+        const idx = headers.indexOf(alias);
+        if (idx !== -1) return [field, idx];
+      }
+      return [field, -1];
+    })
+  );
+
+  const get = (row, field) => {
+    const idx = colIdx[field];
+    return idx !== -1 && row[idx] != null ? row[idx].trim() || null : null;
+  };
+
+  const parseTs = s => {
+    if (!s) return null;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  };
+
+  const entries = rows.slice(1)
+    .filter(row => row.some(f => f.trim()))
+    .map(row => ({
+      startDate:    parseTs(get(row, 'startdate')),
+      endDate:      parseTs(get(row, 'enddate')),
+      sourceIp:     get(row, 'sourceip'),
+      destIp:       get(row, 'destip'),
+      destHost:     get(row, 'desthost'),
+      tool:         get(row, 'tool'),
+      userContext:  get(row, 'usercontext'),
+      command:      get(row, 'command'),
+      description:  get(row, 'description'),
+      output:       get(row, 'output'),
+      comments:     get(row, 'comments'),
+      operatorName: get(row, 'operatorname'),
+      tags:         (get(row, 'tags') || '').split(',').map(t => t.trim()).filter(Boolean),
+    }));
+
+  return { entries };
+}
+
+// Simple RFC-4180-compliant CSV parser (handles quoted fields with commas/newlines)
+function parseCSVRows(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"')                    { inQuotes = false; }
+      else                                    { field += ch; }
+    } else {
+      if      (ch === '"')  { inQuotes = true; }
+      else if (ch === ',')  { row.push(field); field = ''; }
+      else if (ch === '\n') { row.push(field); field = ''; rows.push(row); row = []; }
+      else                  { field += ch; }
+    }
+  }
+  row.push(field);
+  if (row.some(f => f.trim())) rows.push(row);
+  return rows;
+}
+
+// ── Parse quality check ───────────────────────────────────
+// Returns { ok: true } when the parsed result looks reasonable, or
+// { ok: false, warning: string } when the raw output has content but the
+// parser produced nothing — a likely format mismatch.
+
+export function checkParseQuality(snap) {
+  const { commandType, rawOutput, parsed } = snap;
+  if (!parsed || !rawOutput) return { ok: true, warning: null };
+
+  // Only warn when there's meaningful content to parse
+  const meaningfulLines = rawOutput.split('\n').filter(l => l.trim().length > 0).length;
+  if (meaningfulLines < 3) return { ok: true, warning: null };
+
+  // Array-based parsers: warn if the primary collection is empty
+  const arrayKey = {
+    netstat:             p => p.connections,
+    pslist:              p => p.processes,
+    ipconfig:            p => p.interfaces,
+    arp:                 p => p.entries,
+    sessions:            p => p.sessions,
+    passwd:              p => p.users,
+    shadow:              p => p.entries,
+    lastlog:             p => p.entries,
+    netshare:            p => p.shares,
+    localadmins:         p => p.members,
+    whoami:              p => p.groups,
+    addomaincontrollers: p => p.domainControllers,
+    adtrusts:            p => p.trusts,
+    adous:               p => p.ous,
+    adcs:                p => p.cas,
+    sudol:               p => p.canRunSudo ? p.entries : null,
+    netuser:             p => p.type === 'list' ? p.users : null,
+  }[commandType];
+
+  if (arrayKey) {
+    const arr = arrayKey(parsed);
+    if (Array.isArray(arr) && arr.length === 0) {
+      return { ok: false, warning: `Parser returned 0 results — input may not match the expected format for "${commandType}".` };
+    }
+  }
+
+  // Object-based parsers: warn if all key fields are null
+  if (commandType === 'uname' && parsed.os === null && parsed.kernel === null) {
+    return { ok: false, warning: `Parser could not extract OS info — unexpected uname format.` };
+  }
+  if (commandType === 'addomain' && parsed.name === null) {
+    return { ok: false, warning: `Parser could not extract domain name — unexpected Get-ADDomain format.` };
+  }
+  if (commandType === 'netaccounts' && Object.values(parsed).every(v => v === null)) {
+    return { ok: false, warning: `Parser returned all null fields — unexpected net accounts format.` };
+  }
+  if (commandType === 'netuser' && parsed.type === 'detail' && parsed.username === null) {
+    return { ok: false, warning: `Parser could not extract username — unexpected net user detail format.` };
+  }
+
+  return { ok: true, warning: null };
 }
 
 // ── Diff helpers ──────────────────────────────────────────
