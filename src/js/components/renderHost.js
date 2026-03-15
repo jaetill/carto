@@ -532,7 +532,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
       ...Object.keys(latest).filter(t => !ORDER.includes(t)),
     ];
 
-    const WIDE = new Set(['netstat','pslist','whoami','addomain','addomaincontrollers','adtrusts','adous']);
+    const WIDE = new Set(['addomain','addomaincontrollers','adtrusts','adous']);
     const grid = document.createElement('div');
     grid.className = 'grid grid-cols-2 gap-3 items-start';
 
