@@ -729,16 +729,22 @@ export async function renderTopology(engagementId, container, onHostClick) {
     cy.on('mouseover', 'node[type="host"], node[type="user"], edge', (e) => showTooltip(canvas, e.target));
     cy.on('mouseout',  'node[type="host"], node[type="user"], edge', () => canvas.querySelector('#cy-tip')?.remove());
 
-    // Click host → refocus
+    // Single tap → refocus; double-tap → navigate to host detail
+    let _tapTimer = null;
     cy.on('tap', 'node[type="host"]', (e) => {
       const id = e.target.data('id');
-      if (!isUserFocal && focalId === id) {
-        // Second click on focal host → navigate to host detail
+      if (_tapTimer?.id === id) {
+        clearTimeout(_tapTimer.t);
+        _tapTimer = null;
         if (onHostClick) onHostClick(id);
       } else {
-        focalId = id;
-        picker.value = id;
-        draw();
+        if (_tapTimer) clearTimeout(_tapTimer.t);
+        _tapTimer = { id, t: setTimeout(() => {
+          _tapTimer = null;
+          focalId = id;
+          picker.value = id;
+          draw();
+        }, 280) };
       }
     });
 
@@ -766,8 +772,8 @@ export async function renderTopology(engagementId, container, onHostClick) {
       info.innerHTML = `${parts.join(' · ') || `${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}`}${userPart} &nbsp;·&nbsp; Click user again to clear focus`;
     } else {
       info.innerHTML = focalId
-        ? `Showing ${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}${userPart} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Click focused host again to open detail`
-        : `${visibleHostNodes} connected host${visibleHostNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click any host to focus · Click any user to focus`;
+        ? `Showing ${visibleHostNodes} host${visibleHostNodes !== 1 ? 's' : ''}${userPart} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} within ${hopCount} hop${hopCount !== 1 ? 's' : ''} &nbsp;·&nbsp; Double-click any host to open detail`
+        : `${visibleHostNodes} connected host${visibleHostNodes !== 1 ? 's' : ''} · ${visibleEdges} connection${visibleEdges !== 1 ? 's' : ''} &nbsp;·&nbsp; Click to focus · Double-click to open detail · Click any user to focus`;
     }
     container.appendChild(info);
   }

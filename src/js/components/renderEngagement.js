@@ -20,7 +20,7 @@ export async function renderEngagement(engagementId) {
   let collapsedSubnets = null;
 
   // Tab state
-  let activeTab = 'overview'; // 'overview' | 'topology' | 'pathing'
+  let activeTab = 'overview'; // 'overview' | 'analytics' | 'topology' | 'pathing'
 
   render();
 
@@ -95,9 +95,10 @@ export async function renderEngagement(engagementId) {
     tabBar.className = 'flex items-center gap-1 mb-6 border-b border-slate-200';
 
     const tabs = [
-      { id: 'overview', label: 'Overview' },
-      { id: 'topology', label: 'Topology' },
-      { id: 'pathing',  label: 'Attack Path' },
+      { id: 'overview',   label: 'Overview' },
+      { id: 'analytics',  label: 'Analytics' },
+      { id: 'topology',   label: 'Topology' },
+      { id: 'pathing',    label: 'Attack Path' },
     ];
 
     tabs.forEach(({ id, label }) => {
@@ -139,6 +140,13 @@ export async function renderEngagement(engagementId) {
     container.appendChild(tabBar);
 
     // ── Tab content ───────────────────────────────────────
+    if (activeTab === 'analytics') {
+      renderAnalyticsTab(container, data.hosts, snapshots, (hostId) =>
+        import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports))
+      );
+      return;
+    }
+
     if (activeTab === 'topology') {
       const topologyContainer = document.createElement('div');
       container.appendChild(topologyContainer);
@@ -950,4 +958,279 @@ function mergeHostsFromImport(data, imp, _snapshots) {
   }
 
   return { added, updated };
+}
+
+// ── Analytic Highlights ───────────────────────────────────
+
+function analyzeEngagement(hosts, snapshots) {
+  const findings = [];
+
+  // Group snapshots by hostId, keep latest per commandType
+  const byHost = {};
+  for (const s of snapshots) {
+    if (!byHost[s.hostId]) byHost[s.hostId] = {};
+    if (!byHost[s.hostId][s.commandType]) byHost[s.hostId][s.commandType] = s;
+  }
+
+  const hostMap = Object.fromEntries(hosts.map(h => [h.id, h]));
+
+  for (const [hostId, latest] of Object.entries(byHost)) {
+    const host = hostMap[hostId];
+    if (!host) continue;
+
+    // ── Credential exposure ────────────────────────────────
+
+    // Sensitive env vars with non-empty values
+    for (const v of (latest.env?.parsed?.vars || []).filter(v => v.isSensitive && v.value?.trim())) {
+      findings.push({
+        severity: 'high', category: 'Credential Exposure',
+        title: `Sensitive env var: ${v.key}`,
+        detail: v.value.length > 80 ? v.value.slice(0, 80) + '…' : v.value,
+        host,
+      });
+    }
+
+    // Shadow hashes
+    const crackable = (latest.shadow?.parsed?.entries || []).filter(e => e.hasHash);
+    if (crackable.length) {
+      findings.push({
+        severity: 'critical', category: 'Credential Exposure',
+        title: `${crackable.length} crackable hash${crackable.length !== 1 ? 'es' : ''} in /etc/shadow`,
+        detail: crackable.map(e => `${e.username} (${e.hashAlgo})`).join(', '),
+        host,
+      });
+    }
+
+    // ── Privilege escalation ───────────────────────────────
+
+    // Dangerous Windows privileges enabled
+    const dangerPrivs = latest.whoami?.parsed?.dangerousPrivileges || [];
+    if (dangerPrivs.length) {
+      findings.push({
+        severity: 'critical', category: 'Privilege Escalation',
+        title: `Dangerous privilege${dangerPrivs.length !== 1 ? 's' : ''} enabled: ${dangerPrivs.join(', ')}`,
+        detail: `Running as: ${latest.whoami.parsed.username ?? '(unknown)'}`,
+        host,
+      });
+    }
+
+    // SYSTEM scheduled tasks with non-Windows paths
+    for (const t of (latest.schtasks?.parsed?.tasks || [])) {
+      const isSystem = /^(system|nt authority\\system)$/i.test(t.runAs?.trim());
+      const isNonWindows = t.command && !/^(%windir%|c:\\windows)/i.test(t.command.trim());
+      if (isSystem && isNonWindows) {
+        findings.push({
+          severity: 'high', category: 'Persistence / Privilege Escalation',
+          title: `SYSTEM scheduled task with non-Windows path`,
+          detail: `${t.name}  →  ${t.command}`,
+          host,
+        });
+      }
+    }
+
+    // Non-standard SUID binaries
+    const nonStdSuid = (latest.suid?.parsed?.binaries || []).filter(b => b.isNonStandard);
+    if (nonStdSuid.length) {
+      findings.push({
+        severity: 'high', category: 'Privilege Escalation',
+        title: `${nonStdSuid.length} non-standard SUID binary`,
+        detail: nonStdSuid.map(b => b.path).slice(0, 5).join(', '),
+        host,
+      });
+    }
+
+    // Sudo ALL
+    if (latest.sudol?.parsed?.canRunAll) {
+      findings.push({
+        severity: 'critical', category: 'Privilege Escalation',
+        title: `User can run ALL commands via sudo`,
+        detail: `As: ${latest.sudol.parsed.username ?? '(unknown)'}`,
+        host,
+      });
+    }
+
+    // ── Lateral movement / TTPs ────────────────────────────
+
+    // Interesting history commands
+    const interestingCmds = (latest.history?.parsed?.commands || []).filter(c => c.isInteresting);
+    if (interestingCmds.length) {
+      findings.push({
+        severity: 'medium', category: 'Lateral Movement / TTPs',
+        title: `${interestingCmds.length} notable command${interestingCmds.length !== 1 ? 's' : ''} in shell history`,
+        detail: interestingCmds.slice(0, 3).map(c => c.cmd).join(' · '),
+        host,
+      });
+    }
+
+    // Active sessions with domain users
+    const domainSessions = (latest.sessions?.parsed?.sessions || []).filter(s =>
+      s.username && s.username.includes('\\') && s.state === 'Active'
+    );
+    if (domainSessions.length) {
+      findings.push({
+        severity: 'medium', category: 'Lateral Movement / TTPs',
+        title: `${domainSessions.length} active domain session${domainSessions.length !== 1 ? 's' : ''}`,
+        detail: domainSessions.map(s => s.username).join(', '),
+        host,
+      });
+    }
+
+    // ── Suspicious traffic ─────────────────────────────────
+
+    // Established connections to non-RFC1918 / non-loopback IPs
+    const extConns = (latest.netstat?.parsed?.connections || []).filter(c => {
+      if (c.state !== 'ESTABLISHED') return false;
+      const ip = c.remoteAddr ?? '';
+      if (!ip || ip === '0.0.0.0' || ip.startsWith('127.') || ip.startsWith('::')) return false;
+      return !ip.startsWith('10.') && !ip.startsWith('192.168.') && !/^172\.(1[6-9]|2[0-9]|3[01])\./.test(ip);
+    });
+    if (extConns.length) {
+      const uniq = [...new Set(extConns.map(c => `${c.remoteAddr}:${c.remotePort}`))];
+      findings.push({
+        severity: 'medium', category: 'Suspicious Traffic',
+        title: `${extConns.length} established connection${extConns.length !== 1 ? 's' : ''} to external IP`,
+        detail: uniq.slice(0, 4).join(', '),
+        host,
+      });
+    }
+
+    // ── Network exposure ───────────────────────────────────
+
+    // Non-admin shares
+    const pubShares = (latest.netshare?.parsed?.shares || []).filter(s => !s.isAdmin);
+    if (pubShares.length) {
+      findings.push({
+        severity: 'info', category: 'Network Exposure',
+        title: `${pubShares.length} non-admin share${pubShares.length !== 1 ? 's' : ''} exposed`,
+        detail: pubShares.map(s => `${s.name}=${s.path ?? '?'}`).join(', '),
+        host,
+      });
+    }
+
+    // Non-RFC1918 pivot routes (not default, not loopback)
+    const pivotRoutes = (latest.routes?.parsed?.routes || []).filter(r => {
+      if (r.isDefault) return false;
+      const dest = r.destination ?? '';
+      if (dest.startsWith('127.') || dest === '0.0.0.0') return false;
+      return !dest.startsWith('10.') && !dest.startsWith('192.168.') && !/^172\.(1[6-9]|2[0-9]|3[01])\./.test(dest);
+    });
+    if (pivotRoutes.length) {
+      findings.push({
+        severity: 'info', category: 'Network Exposure',
+        title: `${pivotRoutes.length} non-RFC1918 route${pivotRoutes.length !== 1 ? 's' : ''} — potential pivot path`,
+        detail: pivotRoutes.map(r => r.destination).slice(0, 4).join(', '),
+        host,
+      });
+    }
+
+    // Domain admins in local admins group
+    const domAdmins = (latest.localadmins?.parsed?.members || []).filter(m => m.isDomain);
+    if (domAdmins.length) {
+      findings.push({
+        severity: 'info', category: 'Access Control',
+        title: `Domain account in local Administrators`,
+        detail: domAdmins.map(m => m.name).join(', '),
+        host,
+      });
+    }
+  }
+
+  const ORDER = { critical: 0, high: 1, medium: 2, info: 3 };
+  findings.sort((a, b) => (ORDER[a.severity] ?? 9) - (ORDER[b.severity] ?? 9));
+  return findings;
+}
+
+function renderAnalyticsTab(container, hosts, snapshots, onHostClick) {
+  const findings = analyzeEngagement(hosts, snapshots);
+
+  if (!findings.length) {
+    const empty = document.createElement('p');
+    empty.className = 'text-slate-400 text-sm italic text-center py-16';
+    empty.textContent = 'No findings yet — add snapshots to hosts to populate analytics.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const SEVERITY_STYLE = {
+    critical: { badge: 'bg-red-100 text-red-700',    bar: 'bg-red-500',    label: 'Critical' },
+    high:     { badge: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400', label: 'High' },
+    medium:   { badge: 'bg-amber-100 text-amber-700',  bar: 'bg-amber-400',  label: 'Medium' },
+    info:     { badge: 'bg-slate-100 text-slate-600',  bar: 'bg-slate-400',  label: 'Info' },
+  };
+
+  // Summary bar
+  const summary = document.createElement('div');
+  summary.className = 'flex items-center gap-3 mb-5 flex-wrap';
+  for (const sev of ['critical', 'high', 'medium', 'info']) {
+    const count = findings.filter(f => f.severity === sev).length;
+    if (!count) continue;
+    const chip = document.createElement('span');
+    chip.className = `inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${SEVERITY_STYLE[sev].badge}`;
+    chip.innerHTML = `<span class="inline-block w-2 h-2 rounded-full ${SEVERITY_STYLE[sev].bar}"></span>${count} ${SEVERITY_STYLE[sev].label}`;
+    summary.appendChild(chip);
+  }
+  container.appendChild(summary);
+
+  // Group by category
+  const byCategory = {};
+  for (const f of findings) {
+    (byCategory[f.category] ||= []).push(f);
+  }
+
+  for (const [category, items] of Object.entries(byCategory)) {
+    const section = document.createElement('div');
+    section.className = 'mb-5';
+
+    const catHeader = document.createElement('p');
+    catHeader.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2';
+    catHeader.textContent = category;
+    section.appendChild(catHeader);
+
+    const cards = document.createElement('div');
+    cards.className = 'space-y-2';
+
+    for (const f of items) {
+      const s = SEVERITY_STYLE[f.severity];
+      const card = document.createElement('div');
+      card.className = 'bg-white border border-slate-200 rounded-lg px-4 py-3 flex items-start gap-3';
+
+      const dot = document.createElement('span');
+      dot.className = `inline-block w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${s.bar}`;
+
+      const body = document.createElement('div');
+      body.className = 'flex-1 min-w-0';
+
+      const titleRow = document.createElement('div');
+      titleRow.className = 'flex items-center gap-2 flex-wrap';
+
+      const titleEl = document.createElement('span');
+      titleEl.className = 'text-sm font-medium text-slate-800';
+      titleEl.textContent = f.title;
+
+      const hostBtn = document.createElement('button');
+      hostBtn.type = 'button';
+      hostBtn.className = 'text-xs text-indigo-500 hover:text-indigo-700 font-medium flex-shrink-0';
+      hostBtn.textContent = f.host.hostname || f.host.ip || f.host.id;
+      hostBtn.onclick = () => onHostClick(f.host.id);
+
+      titleRow.appendChild(titleEl);
+      titleRow.appendChild(hostBtn);
+      body.appendChild(titleRow);
+
+      if (f.detail) {
+        const detail = document.createElement('p');
+        detail.className = 'text-xs text-slate-500 font-mono mt-0.5 truncate';
+        detail.textContent = f.detail;
+        detail.title = f.detail;
+        body.appendChild(detail);
+      }
+
+      card.appendChild(dot);
+      card.appendChild(body);
+      cards.appendChild(card);
+    }
+
+    section.appendChild(cards);
+    container.appendChild(section);
+  }
 }
