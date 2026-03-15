@@ -1736,6 +1736,496 @@ function parseCSVRows(text) {
   return rows;
 }
 
+// ── Environment variables ─────────────────────────────────
+// Schema: { vars: [{key, value, isSensitive}] }
+
+export function parseEnv(text) {
+  const SENSITIVE = /pass|secret|key|token|cred|api|auth|pwd|pw$/i;
+  const vars = [];
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('(')) continue;
+    const eq = t.indexOf('=');
+    if (eq === -1) continue;
+    const key   = t.slice(0, eq).trim();
+    const value = t.slice(eq + 1).trim();
+    if (!key) continue;
+    vars.push({ key, value, isSensitive: SENSITIVE.test(key) });
+  }
+  return { vars };
+}
+
+// ── Scheduled tasks ───────────────────────────────────────
+// Schema: { tasks: [{name, runAs, command, status, nextRun, lastRun, isSystem}] }
+// Input: schtasks /query /fo LIST /v
+
+export function parseSchtasks(text) {
+  const SYSTEM_USERS = /^(NT AUTHORITY\\SYSTEM|SYSTEM)$/i;
+  const tasks = [];
+  const blocks = text.split(/\n\s*\n+/).filter(b => b.trim());
+
+  function fieldInBlock(block, key) {
+    const re = new RegExp('^\\s*' + key + '\\s*:\\s*(.+)', 'im');
+    const m  = block.match(re);
+    return m ? m[1].trim() : null;
+  }
+
+  for (const block of blocks) {
+    const name = fieldInBlock(block, 'TaskName');
+    if (!name || /^N\/A$/i.test(name)) continue;
+    const runAs  = fieldInBlock(block, 'Run As User');
+    const cmd    = fieldInBlock(block, 'Task To Run');
+    const status = fieldInBlock(block, 'Status');
+    const next   = fieldInBlock(block, 'Next Run Time');
+    const last   = fieldInBlock(block, 'Last Run Time');
+    tasks.push({
+      name,
+      runAs:   runAs ?? null,
+      command: cmd ?? null,
+      status:  status ?? null,
+      nextRun: next ?? null,
+      lastRun: last ?? null,
+      isSystem: runAs ? SYSTEM_USERS.test(runAs) : false,
+    });
+  }
+  return { tasks };
+}
+
+// ── Crontab ───────────────────────────────────────────────
+// Schema: { entries: [{schedule, command, isAtJob, isNonStandard}] }
+// Input: crontab -l or cat /etc/cron.d/*
+
+export function parseCrontab(text) {
+  const STANDARD_PATHS = ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/lib/', '/usr/local/bin/'];
+  const entries = [];
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    if (t.startsWith('@')) {
+      // @reboot, @daily, etc.
+      const spaceIdx = t.indexOf(' ');
+      const schedule = spaceIdx !== -1 ? t.slice(0, spaceIdx) : t;
+      const command  = spaceIdx !== -1 ? t.slice(spaceIdx + 1).trim() : '';
+      if (!command) continue;
+      const cmdPath = command.trim().split(/\s+/)[0] || '';
+      entries.push({
+        schedule,
+        command,
+        isAtJob: true,
+        isNonStandard: !STANDARD_PATHS.some(p => cmdPath.startsWith(p)),
+      });
+    } else {
+      // Standard cron: m h dom mon dow command
+      const parts = t.split(/\s+/);
+      if (parts.length < 6) continue;
+      const schedule = parts.slice(0, 5).join(' ');
+      const command  = parts.slice(5).join(' ');
+      const cmdPath  = parts[5] || '';
+      entries.push({
+        schedule,
+        command,
+        isAtJob: false,
+        isNonStandard: !STANDARD_PATHS.some(p => cmdPath.startsWith(p)),
+      });
+    }
+  }
+  return { entries };
+}
+
+// ── Services ──────────────────────────────────────────────
+// Schema: { services: [{name, displayName, state, startType, runAs}] }
+// Input: sc query state= all / Get-Service|FT / systemctl list-units --all
+
+export function parseServices(text) {
+  const services = [];
+
+  // Windows sc query state= all — blocks starting with SERVICE_NAME:
+  if (/SERVICE_NAME:/i.test(text)) {
+    const blocks = text.split(/\n(?=SERVICE_NAME:)/i).filter(b => b.trim());
+    for (const block of blocks) {
+      const nameM    = block.match(/^SERVICE_NAME:\s*(.+)/im);
+      const dispM    = block.match(/DISPLAY_NAME:\s*(.+)/i);
+      const stateM   = block.match(/STATE\s+:\s+\d+\s+(\w+)/i);
+      if (!nameM) continue;
+      services.push({
+        name:        nameM[1].trim(),
+        displayName: dispM ? dispM[1].trim() : null,
+        state:       stateM ? stateM[1].toUpperCase() : null,
+        startType:   null,
+        runAs:       null,
+      });
+    }
+    return { services };
+  }
+
+  // Windows Get-Service | Format-Table (Status Name DisplayName)
+  if (/Status\s+Name\s+DisplayName/i.test(text)) {
+    let headerFound = false;
+    for (const line of text.split('\n')) {
+      if (/Status\s+Name\s+DisplayName/i.test(line)) { headerFound = true; continue; }
+      if (/^[-\s]+$/.test(line)) continue;
+      if (!headerFound) continue;
+      const t = line.trim();
+      if (!t) continue;
+      const parts = t.split(/\s{2,}/);
+      if (parts.length >= 2) {
+        services.push({
+          name:        parts[1]?.trim() ?? parts[0].trim(),
+          displayName: parts[2]?.trim() ?? null,
+          state:       parts[0]?.trim().toUpperCase() ?? null,
+          startType:   null,
+          runAs:       null,
+        });
+      }
+    }
+    return { services };
+  }
+
+  // Linux systemctl list-units --type=service --all
+  // Lines like: [●]  apache2.service  loaded active running  Apache HTTP Server
+  for (const line of text.split('\n')) {
+    let t = line.replace(/^●\s*/, '').trim();
+    if (!t || /^UNIT\s/i.test(t) || /^LOAD\s/i.test(t) || /^\s*$/.test(t)) continue;
+    // e.g. "apache2.service  loaded active running  Apache HTTP Server"
+    const m = t.match(/^(\S+\.service)\s+(\S+)\s+(\S+)\s+(\S+)\s*(.*)/i);
+    if (!m) continue;
+    const [, unit, , active, sub, desc] = m;
+    const state = sub.toUpperCase();
+    services.push({
+      name:        unit,
+      displayName: desc.trim() || null,
+      state,
+      startType:   null,
+      runAs:       null,
+    });
+  }
+
+  return { services };
+}
+
+// ── Routes ────────────────────────────────────────────────
+// Schema: { routes: [{destination, netmask, gateway, iface, metric, isDefault}] }
+// Input: ip route (Linux) or route print (Windows)
+
+export function parseRoutes(text) {
+  const routes = [];
+
+  // Linux ip route
+  if (/\bdev\b/.test(text) && !/Active Routes/.test(text)) {
+    for (const line of text.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      // default via 10.10.1.1 dev eth0 [proto dhcp] [src ...]
+      const defM = t.match(/^default via (\S+) dev (\S+)/);
+      if (defM) {
+        const metricM = t.match(/metric\s+(\d+)/);
+        routes.push({
+          destination: '0.0.0.0/0',
+          netmask:     null,
+          gateway:     defM[1],
+          iface:       defM[2],
+          metric:      metricM ? parseInt(metricM[1]) : null,
+          isDefault:   true,
+        });
+        continue;
+      }
+      // 10.10.3.0/24 via 10.10.1.200 dev eth0
+      // 10.10.1.0/24 dev eth0 proto kernel
+      const routeM = t.match(/^(\S+)\s+(?:via\s+(\S+)\s+)?dev\s+(\S+)/);
+      if (routeM) {
+        const metricM = t.match(/metric\s+(\d+)/);
+        routes.push({
+          destination: routeM[1],
+          netmask:     null,
+          gateway:     routeM[2] ?? null,
+          iface:       routeM[3],
+          metric:      metricM ? parseInt(metricM[1]) : null,
+          isDefault:   false,
+        });
+      }
+    }
+    return { routes };
+  }
+
+  // Windows route print — look for Active Routes: section
+  let inActive = false;
+  for (const line of text.split('\n')) {
+    if (/Active Routes:/i.test(line)) { inActive = true; continue; }
+    if (!inActive) continue;
+    if (/Persistent Routes:|Default Gateway/i.test(line)) { inActive = false; continue; }
+    const t = line.trim();
+    if (!t || /Network Destination|Netmask|=========|0\.0\.0\.0\s+0\.0\.0\.0\s+On-link/i.test(t)) continue;
+    // Format: dest  netmask  gateway  iface  metric
+    const parts = t.split(/\s+/);
+    if (parts.length >= 5 && /^\d+\.\d+\.\d+\.\d+/.test(parts[0])) {
+      routes.push({
+        destination: parts[0],
+        netmask:     parts[1] ?? null,
+        gateway:     parts[2] ?? null,
+        iface:       parts[3] ?? null,
+        metric:      parts[4] ? parseInt(parts[4]) : null,
+        isDefault:   parts[0] === '0.0.0.0',
+      });
+    }
+  }
+
+  return { routes };
+}
+
+// ── Hosts file ────────────────────────────────────────────
+// Schema: { entries: [{ip, hosts: [string]}] }
+// Input: /etc/hosts or C:\Windows\System32\drivers\etc\hosts
+
+export function parseHostsFile(text) {
+  const STANDARD = new Set(['127.0.0.1 localhost', '::1 localhost', '127.0.1.1']);
+  const entries = [];
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const parts = t.split(/\s+/);
+    if (parts.length < 2) continue;
+    const ip    = parts[0];
+    const hosts = parts.slice(1).filter(h => h && !h.startsWith('#'));
+    if (!hosts.length) continue;
+    // Skip standard loopback entries
+    const key = `${ip} ${hosts[0]}`;
+    if (STANDARD.has(key) || STANDARD.has(ip)) continue;
+    if (ip === '127.0.0.1' && hosts.every(h => /^localhost/i.test(h))) continue;
+    if (ip === '::1'       && hosts.every(h => /^localhost/i.test(h))) continue;
+    entries.push({ ip, hosts });
+  }
+  return { entries };
+}
+
+// ── Firewall rules ────────────────────────────────────────
+// Schema: { rules: [{chain, target, proto, source, destination, notes}], raw: string }
+// Input: iptables -L -n, ufw status verbose, netsh advfirewall show allprofiles
+
+export function parseFirewall(text) {
+  const rules = [];
+
+  // iptables -L -n: Chain INPUT (policy ACCEPT), then rule lines
+  if (/Chain\s+(INPUT|OUTPUT|FORWARD)/i.test(text)) {
+    let currentChain = null;
+    for (const line of text.split('\n')) {
+      const chainM = line.match(/^Chain\s+(\S+)/i);
+      if (chainM) { currentChain = chainM[1]; continue; }
+      if (!currentChain) continue;
+      const t = line.trim();
+      if (!t || /^target\s+prot/i.test(t) || /^pkts\s+bytes/i.test(t)) continue;
+      // iptables rule line: target prot opt source destination [options]
+      const m = t.match(/^(ACCEPT|DROP|REJECT|RETURN|LOG|MASQUERADE|DNAT|SNAT|\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)(.*)/i);
+      if (m) {
+        rules.push({
+          chain:       currentChain,
+          target:      m[1],
+          proto:       m[2] !== '--' ? m[2] : 'all',
+          source:      m[4] !== '0.0.0.0/0' ? m[4] : 'any',
+          destination: m[5] !== '0.0.0.0/0' ? m[5] : 'any',
+          notes:       m[6].trim() || null,
+        });
+      }
+    }
+    return { rules, raw: text.trim() };
+  }
+
+  // ufw status verbose: To/Action/From table
+  if (/Status:\s*(active|inactive)/i.test(text) || /To\s+Action\s+From/i.test(text)) {
+    let inTable = false;
+    for (const line of text.split('\n')) {
+      if (/^To\s+Action\s+From/i.test(line)) { inTable = true; continue; }
+      if (/^-{3,}/.test(line) && inTable) continue;
+      if (!inTable) continue;
+      const t = line.trim();
+      if (!t) continue;
+      // e.g. "22/tcp                     ALLOW IN    Anywhere"
+      const m = t.match(/^(\S+(?:\/\S+)?)\s+(ALLOW|DENY|REJECT|LIMIT)\s*(IN|OUT|FWD|FORWARD)?\s*(.*)/i);
+      if (m) {
+        rules.push({
+          chain:       m[3] ? m[3].toUpperCase() : 'IN',
+          target:      m[2].toUpperCase(),
+          proto:       m[1].includes('/') ? m[1].split('/')[1] : 'any',
+          source:      m[4].trim() || 'any',
+          destination: m[1].split('/')[0],
+          notes:       null,
+        });
+      }
+    }
+    return { rules, raw: text.trim() };
+  }
+
+  // netsh advfirewall — just return raw for rendering
+  return { rules: [], raw: text.trim() };
+}
+
+// ── Banner grab ───────────────────────────────────────────
+// Schema: { service, version, statusCode, headers: {}, raw }
+// Input: raw output from nc, curl -I, nmap -sV, etc.
+
+export function parseBannerGrab(text) {
+  const raw = text.trim();
+  const headers = {};
+  let service = 'unknown';
+  let version = null;
+  let statusCode = null;
+
+  // HTTP
+  if (/HTTP\/[\d.]+\s+\d+/i.test(raw)) {
+    service = /https/i.test(raw.split('\n')[0]) ? 'HTTPS' : 'HTTP';
+    const statusM = raw.match(/HTTP\/[\d.]+\s+(\d+)/i);
+    if (statusM) statusCode = parseInt(statusM[1]);
+    for (const line of raw.split('\n')) {
+      const hm = line.match(/^(Server|X-Powered-By|Content-Type|Location|WWW-Authenticate):\s*(.+)/i);
+      if (hm) headers[hm[1]] = hm[2].trim();
+    }
+    version = headers['Server'] || null;
+    return { service, version, statusCode, headers, raw };
+  }
+
+  // SSH
+  if (/^SSH-/m.test(raw)) {
+    service = 'SSH';
+    const sshM = raw.match(/^(SSH-[\d.]+-\S+)/m);
+    version = sshM ? sshM[1] : null;
+    return { service, version, statusCode: null, headers, raw };
+  }
+
+  // SMTP with ESMTP keyword
+  const smtpM = raw.match(/^220\s+.*ESMTP/im);
+  if (smtpM) {
+    service = 'SMTP';
+    version = smtpM[0].replace(/^220\s+/, '').trim();
+    return { service, version, statusCode: 220, headers, raw };
+  }
+
+  // FTP
+  const ftpM = raw.match(/^220\s+(.+)/im);
+  if (ftpM) {
+    service = 'FTP';
+    version = ftpM[1].trim();
+    return { service, version, statusCode: 220, headers, raw };
+  }
+
+  return { service, version, statusCode, headers, raw };
+}
+
+// ── SUID binaries ─────────────────────────────────────────
+// Schema: { binaries: [{path, isNonStandard}] }
+// Input: find / -perm -4000 -type f 2>/dev/null
+
+export function parseSuid(text) {
+  const STANDARD = ['/usr/bin/', '/usr/sbin/', '/bin/', '/sbin/', '/usr/lib/', '/usr/libexec/'];
+  const binaries = [];
+  for (const line of text.split('\n')) {
+    const t = line.trim();
+    if (!t || !t.startsWith('/')) continue;
+    binaries.push({
+      path:          t,
+      isNonStandard: !STANDARD.some(p => t.startsWith(p)),
+    });
+  }
+  return { binaries };
+}
+
+// ── Shell history ─────────────────────────────────────────
+// Schema: { commands: [{cmd, isInteresting}] }
+// Input: cat ~/.bash_history, Get-Content (Get-PSReadlineOption).HistorySavePath
+
+export function parseHistory(text) {
+  const INTERESTING = /ssh\b|wget |curl |nc |ncat|netcat|password|passwd|secret|invoke-web|iwr |mimikatz|bloodhound|sharphound|powerview|msfvenom|meterpreter|psexec|wmiexec|smbclient|crackmapexec|sqlmap|hydra|hashcat|john |runas |su |sudo |base64|certutil|bitsadmin|regsvr32|rundll32|mshta|wscript|cscript/i;
+  const commands = [];
+  for (const line of text.split('\n')) {
+    // Strip leading history number (bash format: "  123  command")
+    const stripped = line.replace(/^\s*\d+\s+/, '');
+    const cmd = stripped.trim();
+    if (!cmd) continue;
+    commands.push({ cmd, isInteresting: INTERESTING.test(cmd) });
+  }
+  return { commands };
+}
+
+// ── Installed software ────────────────────────────────────
+// Schema: { packages: [{name, version, arch}] }
+// Input: dpkg -l, rpm -qa, Get-WmiObject Win32_Product|FT, Get-Package
+
+export function parseSoftware(text) {
+  const packages = [];
+
+  // dpkg -l: lines starting with "ii " (installed)
+  if (/^ii\s+/m.test(text)) {
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('ii ')) continue;
+      const parts = line.slice(2).trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const name    = parts[0];
+      const version = parts[1];
+      const arch    = parts[2] && !parts[2].startsWith('<') ? parts[2] : null;
+      packages.push({ name, version, arch });
+    }
+    return { packages };
+  }
+
+  // rpm -qa: name-version-release.arch (one per line)
+  if (/^[\w][\w.+%-]+-[\d][\d.].*/m.test(text) && !/^\s*Name\s+Version/im.test(text)) {
+    for (const line of text.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      // Split on last two hyphens for name, version, release.arch
+      const lastHyphen = t.lastIndexOf('-');
+      if (lastHyphen === -1) continue;
+      const verRelArch = t.slice(lastHyphen + 1);
+      const nameVer    = t.slice(0, lastHyphen);
+      const secHyphen  = nameVer.lastIndexOf('-');
+      if (secHyphen === -1) { packages.push({ name: nameVer, version: verRelArch, arch: null }); continue; }
+      const name    = nameVer.slice(0, secHyphen);
+      const version = nameVer.slice(secHyphen + 1) + '-' + verRelArch.split('.')[0];
+      const arch    = verRelArch.includes('.') ? verRelArch.split('.').pop() : null;
+      packages.push({ name, version, arch });
+    }
+    return { packages };
+  }
+
+  // Windows Get-WmiObject Win32_Product | Format-Table or Get-Package
+  // Header line with Name and Version columns
+  let nameIdx = -1, versionIdx = -1;
+  let headerLine = '';
+  for (const line of text.split('\n')) {
+    if (/\bName\b.*\bVersion\b/i.test(line) || /\bVersion\b.*\bName\b/i.test(line)) {
+      headerLine = line;
+      const lower = line.toLowerCase();
+      nameIdx    = lower.indexOf('name');
+      versionIdx = lower.indexOf('version');
+      break;
+    }
+  }
+  if (nameIdx !== -1) {
+    let pastHeader = false;
+    for (const line of text.split('\n')) {
+      if (line === headerLine) { pastHeader = true; continue; }
+      if (!pastHeader) continue;
+      if (/^[-\s]+$/.test(line)) continue;
+      const t = line.trim();
+      if (!t) continue;
+      // Try tab-split first, fall back to fixed-width
+      const tabParts = line.split('\t');
+      if (tabParts.length >= 2) {
+        packages.push({ name: tabParts[nameIdx > versionIdx ? 0 : 0].trim(), version: tabParts[nameIdx > versionIdx ? 1 : 1].trim(), arch: null });
+      } else if (versionIdx > nameIdx) {
+        const name    = line.slice(nameIdx, versionIdx).trim();
+        const version = line.slice(versionIdx).trim().split(/\s+/)[0];
+        if (name) packages.push({ name, version: version || null, arch: null });
+      } else {
+        // Just split on two or more spaces
+        const parts = t.split(/\s{2,}/);
+        if (parts.length >= 2) packages.push({ name: parts[0], version: parts[1], arch: null });
+      }
+    }
+    return { packages };
+  }
+
+  return { packages };
+}
+
 // ── Parse quality check ───────────────────────────────────
 // Returns { ok: true } when the parsed result looks reasonable, or
 // { ok: false, warning: string } when the raw output has content but the
@@ -1768,6 +2258,17 @@ export function checkParseQuality(snap) {
     adcs:                p => p.cas,
     sudol:               p => p.canRunSudo ? p.entries : null,
     netuser:             p => p.type === 'list' ? p.users : null,
+    env:                 p => p.vars,
+    schtasks:            p => p.tasks,
+    crontab:             p => p.entries,
+    services:            p => p.services,
+    routes:              p => p.routes,
+    hostsfile:           p => p.entries,
+    history:             p => p.commands,
+    suid:                p => p.binaries,
+    software:            p => p.packages,
+    bannergrab:          p => p.raw ? null : p.rules,
+    firewall:            p => p.rules.length ? p.rules : null,
   }[commandType];
 
   if (arrayKey) {

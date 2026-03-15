@@ -4,7 +4,9 @@ import { mockEngagements, mockEngagementData, mockSnapshots, mockImports, MOCK_E
 import { parseNetstat, parsePslist, parseIpconfig, parseUname, parseArp,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
          parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
-         parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS } from './parsers.js';
+         parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS,
+         parseEnv, parseSchtasks, parseCrontab, parseServices, parseRoutes,
+         parseHostsFile, parseFirewall, parseBannerGrab, parseSuid, parseHistory, parseSoftware } from './parsers.js';
 
 export { apiGet, apiPost };
 
@@ -76,6 +78,17 @@ function applyParsers(snap) {
     if (snap.commandType === 'adtrusts')           parsed = parseADTrusts(snap.rawOutput);
     if (snap.commandType === 'adous')              parsed = parseADOUs(snap.rawOutput);
     if (snap.commandType === 'adcs')               parsed = parseADCS(snap.rawOutput);
+    if (snap.commandType === 'env')                parsed = parseEnv(snap.rawOutput);
+    if (snap.commandType === 'schtasks')           parsed = parseSchtasks(snap.rawOutput);
+    if (snap.commandType === 'crontab')            parsed = parseCrontab(snap.rawOutput);
+    if (snap.commandType === 'services')           parsed = parseServices(snap.rawOutput);
+    if (snap.commandType === 'routes')             parsed = parseRoutes(snap.rawOutput);
+    if (snap.commandType === 'hostsfile')          parsed = parseHostsFile(snap.rawOutput);
+    if (snap.commandType === 'firewall')           parsed = parseFirewall(snap.rawOutput);
+    if (snap.commandType === 'bannergrab')         parsed = parseBannerGrab(snap.rawOutput);
+    if (snap.commandType === 'suid')               parsed = parseSuid(snap.rawOutput);
+    if (snap.commandType === 'history')            parsed = parseHistory(snap.rawOutput);
+    if (snap.commandType === 'software')           parsed = parseSoftware(snap.rawOutput);
   } catch (e) { console.warn('[carto] Parse error:', e); }
   return { ...snap, parsed };
 }

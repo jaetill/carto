@@ -6,6 +6,8 @@ import { detectOS, detectCommand,
          parseNetUser, parseLocalAdmins, parseQwinsta, parsePasswd, parseShadow,
          parseLast, parseWhoamiAll, parseSudoL, parseNetAccounts, parseNetShare,
          parseADDomain, parseADDomainControllers, parseADTrusts, parseADOUs, parseADCS,
+         parseEnv, parseSchtasks, parseCrontab, parseServices, parseRoutes,
+         parseHostsFile, parseFirewall, parseBannerGrab, parseSuid, parseHistory, parseSoftware,
          diffSnapshots, checkParseQuality } from '../data/parsers.js';
 
 export function renderHost(engagementId, hostId, data, snapshots, onBack, imports = []) {
@@ -418,6 +420,17 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
         if (cmdType === 'adtrusts')           parsed = parseADTrusts(raw);
         if (cmdType === 'adous')              parsed = parseADOUs(raw);
         if (cmdType === 'adcs')               parsed = parseADCS(raw);
+        if (cmdType === 'env')                parsed = parseEnv(raw);
+        if (cmdType === 'schtasks')           parsed = parseSchtasks(raw);
+        if (cmdType === 'crontab')            parsed = parseCrontab(raw);
+        if (cmdType === 'services')           parsed = parseServices(raw);
+        if (cmdType === 'routes')             parsed = parseRoutes(raw);
+        if (cmdType === 'hostsfile')          parsed = parseHostsFile(raw);
+        if (cmdType === 'firewall')           parsed = parseFirewall(raw);
+        if (cmdType === 'bannergrab')         parsed = parseBannerGrab(raw);
+        if (cmdType === 'suid')               parsed = parseSuid(raw);
+        if (cmdType === 'history')            parsed = parseHistory(raw);
+        if (cmdType === 'software')           parsed = parseSoftware(raw);
       } catch (e) { console.warn('Parse error:', e); }
 
       const snap = newSnapshot({ hostId, commandType: cmdType, osFamily, rawOutput: raw, parsed });
@@ -522,6 +535,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
     // One card per commandType, ordered by security relevance
     const ORDER = ['netstat','pslist','localadmins','shadow','whoami','sudol','sessions',
                    'passwd','netaccounts','netshare','lastlog','ipconfig','uname','arp','netuser',
+                   'env','history','schtasks','crontab','services','routes','hostsfile','firewall','bannergrab','suid','software',
                    'addomain','addomaincontrollers','adtrusts','adous','adcs'];
     const latest = {};
     for (const snap of hostSnaps) {
@@ -532,7 +546,7 @@ export function renderHost(engagementId, hostId, data, snapshots, onBack, import
       ...Object.keys(latest).filter(t => !ORDER.includes(t)),
     ];
 
-    const WIDE = new Set(['addomain','addomaincontrollers','adtrusts','adous']);
+    const WIDE = new Set(['addomain','addomaincontrollers','adtrusts','adous','firewall']);
     const grid = document.createElement('div');
     grid.className = 'grid grid-cols-2 gap-3 items-start';
 
@@ -1540,6 +1554,507 @@ function renderParsedBody(card, snap) {
       }
       card.appendChild(caCard);
     });
+    return;
+  }
+
+  if (snap.commandType === 'env') {
+    const allVars = snap.parsed.vars || [];
+    // Show sensitive first
+    const sorted = [...allVars.filter(v => v.isSensitive), ...allVars.filter(v => !v.isSensitive)];
+    const sensitiveCount = allVars.filter(v => v.isSensitive).length;
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Environment Variables (${allVars.length})${sensitiveCount ? ` — ${sensitiveCount} sensitive` : ''}`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    sorted.slice(0, 30).forEach(v => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100' + (v.isSensitive ? ' bg-amber-50' : '');
+      const keyTd = document.createElement('td');
+      keyTd.className = `py-0.5 pr-3 font-semibold w-48 truncate ${v.isSensitive ? 'text-amber-700' : 'text-slate-600'}`;
+      keyTd.textContent = v.key;
+      const valTd = document.createElement('td');
+      valTd.className = 'py-0.5 text-slate-600 truncate max-w-xs';
+      const displayVal = v.value.length > 60 ? v.value.slice(0, 60) + '…' : v.value;
+      valTd.textContent = displayVal;
+      valTd.title = v.value;
+      tr.appendChild(keyTd); tr.appendChild(valTd);
+      table.appendChild(tr);
+    });
+    if (sorted.length > 30) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${sorted.length - 30} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'schtasks') {
+    const tasks = snap.parsed.tasks || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Scheduled Tasks (${tasks.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    tasks.slice(0, 20).forEach(t => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      // Task name
+      const nameTd = document.createElement('td');
+      const isNonMicrosoft = t.name && !t.name.toLowerCase().includes('\\microsoft\\') && !t.name.toLowerCase().startsWith('\\microsoft');
+      nameTd.className = `py-0.5 pr-3 truncate max-w-xs ${isNonMicrosoft ? 'text-indigo-700' : 'text-slate-600'}`;
+      nameTd.textContent = t.name;
+      nameTd.title = t.name;
+      // Run as
+      const runAsTd = document.createElement('td');
+      runAsTd.className = 'py-0.5 pr-3';
+      if (t.isSystem) {
+        const badge = document.createElement('span');
+        badge.className = 'text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold';
+        badge.textContent = 'SYSTEM';
+        runAsTd.appendChild(badge);
+      } else {
+        runAsTd.className += ' text-slate-500';
+        runAsTd.textContent = t.runAs ?? '—';
+      }
+      // Command
+      const cmdTd = document.createElement('td');
+      cmdTd.className = 'py-0.5 pr-3 text-slate-500 truncate max-w-xs';
+      cmdTd.textContent = t.command ?? '—';
+      cmdTd.title = t.command ?? '';
+      // Status
+      const statusTd = document.createElement('td');
+      statusTd.className = 'py-0.5 text-slate-400';
+      statusTd.textContent = t.status ?? '';
+      tr.appendChild(nameTd); tr.appendChild(runAsTd); tr.appendChild(cmdTd); tr.appendChild(statusTd);
+      table.appendChild(tr);
+    });
+    if (tasks.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${tasks.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'crontab') {
+    const entries = snap.parsed.entries || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Cron Jobs (${entries.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    entries.slice(0, 20).forEach(e => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      // Schedule cell
+      const schTd = document.createElement('td');
+      schTd.className = 'py-0.5 pr-3 w-40 flex-shrink-0';
+      if (e.isAtJob) {
+        const badge = document.createElement('span');
+        badge.className = 'text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono';
+        badge.textContent = e.schedule;
+        schTd.appendChild(badge);
+      } else {
+        schTd.className += ' text-slate-500';
+        schTd.textContent = e.schedule;
+      }
+      // Command cell
+      const cmdTd = document.createElement('td');
+      cmdTd.className = `py-0.5 truncate max-w-xs ${e.isNonStandard ? 'text-amber-700' : 'text-slate-600'}`;
+      cmdTd.textContent = e.command;
+      cmdTd.title = e.command;
+      tr.appendChild(schTd); tr.appendChild(cmdTd);
+      table.appendChild(tr);
+    });
+    if (entries.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${entries.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'services') {
+    const allServices = snap.parsed.services || [];
+    const INTERESTING_SVC = /sql|ftp|telnet|vnc|rdp|web|http|iis|apache|nginx|tomcat|backup/i;
+    const running = allServices.filter(s => s.state === 'RUNNING' || s.state === 'ACTIVE' || s.state === 'active');
+    const stopped = allServices.filter(s => s.state !== 'RUNNING' && s.state !== 'ACTIVE' && s.state !== 'active');
+
+    if (running.length) {
+      const runLabel = document.createElement('p');
+      runLabel.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      runLabel.textContent = `Running (${running.length})`;
+      card.appendChild(runLabel);
+      const table = document.createElement('table');
+      table.className = 'w-auto text-xs font-mono mb-2';
+      running.slice(0, 20).forEach(s => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        const isInteresting = INTERESTING_SVC.test(s.name) || INTERESTING_SVC.test(s.displayName || '');
+        const nameTd = document.createElement('td');
+        nameTd.className = `py-0.5 pr-3 ${isInteresting ? 'text-amber-700 font-semibold' : 'text-slate-700'}`;
+        nameTd.textContent = s.name;
+        const dispTd = document.createElement('td');
+        dispTd.className = 'py-0.5 pr-3 text-slate-500 truncate max-w-xs';
+        dispTd.textContent = s.displayName ?? '';
+        const stateTd = document.createElement('td');
+        stateTd.className = 'py-0.5';
+        const stateBadge = document.createElement('span');
+        stateBadge.className = 'text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-semibold';
+        stateBadge.textContent = s.state;
+        stateTd.appendChild(stateBadge);
+        tr.appendChild(nameTd); tr.appendChild(dispTd); tr.appendChild(stateTd);
+        table.appendChild(tr);
+      });
+      if (running.length > 20) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3; td.className = 'py-1 text-slate-400 text-xs';
+        td.textContent = `…and ${running.length - 20} more`;
+        tr.appendChild(td); table.appendChild(tr);
+      }
+      card.appendChild(table);
+    }
+
+    if (stopped.length) {
+      const stopLabel = document.createElement('p');
+      stopLabel.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+      stopLabel.textContent = `Stopped / Other (${stopped.length})`;
+      card.appendChild(stopLabel);
+      const table = document.createElement('table');
+      table.className = 'w-auto text-xs font-mono';
+      stopped.slice(0, 10).forEach(s => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        const nameTd = document.createElement('td');
+        nameTd.className = 'py-0.5 pr-3 text-slate-500';
+        nameTd.textContent = s.name;
+        const dispTd = document.createElement('td');
+        dispTd.className = 'py-0.5 pr-3 text-slate-400 truncate max-w-xs';
+        dispTd.textContent = s.displayName ?? '';
+        const stateTd = document.createElement('td');
+        stateTd.className = 'py-0.5';
+        const stateClass = s.state === 'FAILED' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500';
+        const stateBadge = document.createElement('span');
+        stateBadge.className = `text-xs ${stateClass} px-1.5 py-0.5 rounded font-semibold`;
+        stateBadge.textContent = s.state ?? 'STOPPED';
+        stateTd.appendChild(stateBadge);
+        tr.appendChild(nameTd); tr.appendChild(dispTd); tr.appendChild(stateTd);
+        table.appendChild(tr);
+      });
+      if (stopped.length > 10) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3; td.className = 'py-1 text-slate-400 text-xs';
+        td.textContent = `…and ${stopped.length - 10} more`;
+        tr.appendChild(td); table.appendChild(tr);
+      }
+      card.appendChild(table);
+    }
+    return;
+  }
+
+  if (snap.commandType === 'routes') {
+    const RFC1918 = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/;
+    const routes = snap.parsed.routes || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Routes (${routes.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    routes.slice(0, 20).forEach(r => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const destTd = document.createElement('td');
+      destTd.className = `py-0.5 pr-3 ${r.isDefault ? 'font-bold text-indigo-700' : 'text-slate-600'}`;
+      destTd.textContent = r.destination + (r.netmask ? ` / ${r.netmask}` : '');
+      const gwTd = document.createElement('td');
+      const gwIsPublic = r.gateway && r.gateway !== '0.0.0.0' && !RFC1918.test(r.gateway);
+      gwTd.className = `py-0.5 pr-3 ${gwIsPublic ? 'text-amber-700 font-semibold' : 'text-slate-600'}`;
+      gwTd.textContent = r.gateway ?? '—';
+      const ifaceTd = document.createElement('td');
+      ifaceTd.className = 'py-0.5 pr-3 text-slate-400';
+      ifaceTd.textContent = r.iface ?? '';
+      const metricTd = document.createElement('td');
+      metricTd.className = 'py-0.5 text-slate-400';
+      metricTd.textContent = r.metric != null ? String(r.metric) : '';
+      tr.appendChild(destTd); tr.appendChild(gwTd); tr.appendChild(ifaceTd); tr.appendChild(metricTd);
+      table.appendChild(tr);
+    });
+    if (routes.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${routes.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'hostsfile') {
+    const entries = snap.parsed.entries || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Custom host entries (${entries.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    entries.slice(0, 20).forEach(e => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const ipTd = document.createElement('td');
+      ipTd.className = 'py-0.5 pr-4 text-slate-500 w-36 flex-shrink-0';
+      ipTd.textContent = e.ip;
+      const hostsTd = document.createElement('td');
+      hostsTd.className = 'py-0.5 text-slate-700';
+      hostsTd.textContent = e.hosts.join(' ');
+      tr.appendChild(ipTd); tr.appendChild(hostsTd);
+      table.appendChild(tr);
+    });
+    if (entries.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${entries.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'firewall') {
+    const { rules, raw } = snap.parsed;
+    if (rules && rules.length > 0) {
+      for (const chainFilter of ['INPUT', 'OUTPUT', 'FORWARD', 'IN', 'OUT']) {
+        const chainRules = rules.filter(r => r.chain === chainFilter || r.chain === chainFilter.toLowerCase());
+        if (!chainRules.length) continue;
+        const section = document.createElement('div');
+        section.className = 'mb-3';
+        const secLabel = document.createElement('p');
+        secLabel.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+        secLabel.textContent = chainFilter + ` rules (${chainRules.length})`;
+        section.appendChild(secLabel);
+        const table = document.createElement('table');
+        table.className = 'w-auto text-xs font-mono';
+        chainRules.forEach(r => {
+          const tr = document.createElement('tr');
+          tr.className = 'border-t border-slate-100';
+          const targetTd = document.createElement('td');
+          const targetColor = /^ACCEPT$/i.test(r.target) ? 'text-green-700 font-semibold' : /^(DROP|REJECT)$/i.test(r.target) ? 'text-red-700 font-semibold' : 'text-slate-600';
+          targetTd.className = `py-0.5 pr-3 ${targetColor}`;
+          targetTd.textContent = r.target;
+          const protoTd = document.createElement('td');
+          protoTd.className = 'py-0.5 pr-3 text-slate-500';
+          protoTd.textContent = r.proto ?? 'all';
+          const srcTd = document.createElement('td');
+          srcTd.className = 'py-0.5 pr-3 text-slate-600';
+          srcTd.textContent = r.source ?? 'any';
+          const dstTd = document.createElement('td');
+          dstTd.className = 'py-0.5 pr-3 text-slate-600';
+          dstTd.textContent = r.destination ?? 'any';
+          const notesTd = document.createElement('td');
+          notesTd.className = 'py-0.5 text-slate-400';
+          notesTd.textContent = r.notes ?? '';
+          tr.appendChild(targetTd); tr.appendChild(protoTd); tr.appendChild(srcTd); tr.appendChild(dstTd); tr.appendChild(notesTd);
+          table.appendChild(tr);
+        });
+        section.appendChild(table);
+        card.appendChild(section);
+      }
+    } else if (raw) {
+      const pre = document.createElement('pre');
+      pre.className = 'font-mono text-xs bg-slate-50 rounded p-2 max-h-48 overflow-y-auto border border-slate-200 whitespace-pre-wrap';
+      pre.textContent = raw;
+      card.appendChild(pre);
+    }
+    return;
+  }
+
+  if (snap.commandType === 'bannergrab') {
+    const p = snap.parsed;
+    // Service badge
+    const badgeRow = document.createElement('div');
+    badgeRow.className = 'flex items-center gap-2 mb-2';
+    const svcBadge = document.createElement('span');
+    const svcColor = p.service === 'HTTP' || p.service === 'HTTPS' ? 'bg-blue-100 text-blue-700'
+                   : p.service === 'SSH'  ? 'bg-green-100 text-green-700'
+                   : p.service === 'FTP'  ? 'bg-amber-100 text-amber-700'
+                   : p.service === 'SMTP' ? 'bg-slate-100 text-slate-700'
+                   : 'bg-slate-100 text-slate-500';
+    svcBadge.className = `text-xs font-semibold px-2 py-0.5 rounded ${svcColor}`;
+    svcBadge.textContent = p.service;
+    badgeRow.appendChild(svcBadge);
+    if (p.statusCode) {
+      const codeBadge = document.createElement('span');
+      const codeColor = p.statusCode < 300 ? 'bg-green-100 text-green-700' : p.statusCode < 400 ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700';
+      codeBadge.className = `text-xs font-mono font-semibold px-2 py-0.5 rounded ${codeColor}`;
+      codeBadge.textContent = p.statusCode;
+      badgeRow.appendChild(codeBadge);
+    }
+    card.appendChild(badgeRow);
+    if (p.version) {
+      const vEl = document.createElement('p');
+      vEl.className = 'text-sm text-slate-700 font-mono mb-2';
+      vEl.textContent = p.version;
+      card.appendChild(vEl);
+    }
+    // HTTP headers
+    if (Object.keys(p.headers || {}).length) {
+      const headerTable = document.createElement('table');
+      headerTable.className = 'w-auto text-xs font-mono mb-2';
+      for (const [k, v] of Object.entries(p.headers)) {
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-slate-100';
+        const kTd = document.createElement('td');
+        kTd.className = 'py-0.5 pr-3 text-slate-400 w-36';
+        kTd.textContent = k;
+        const vTd = document.createElement('td');
+        vTd.className = 'py-0.5 text-slate-700';
+        vTd.textContent = v;
+        tr.appendChild(kTd); tr.appendChild(vTd);
+        headerTable.appendChild(tr);
+      }
+      card.appendChild(headerTable);
+    }
+    // Raw collapsible
+    const details = document.createElement('details');
+    details.className = 'mt-2';
+    const summary = document.createElement('summary');
+    summary.className = 'text-xs text-slate-400 cursor-pointer select-none hover:text-slate-600';
+    summary.textContent = 'Raw banner';
+    const pre = document.createElement('pre');
+    pre.className = 'font-mono text-xs bg-slate-50 rounded p-2 mt-1 max-h-32 overflow-y-auto border border-slate-200 whitespace-pre-wrap';
+    pre.textContent = p.raw;
+    details.appendChild(summary);
+    details.appendChild(pre);
+    card.appendChild(details);
+    return;
+  }
+
+  if (snap.commandType === 'suid') {
+    const binaries = snap.parsed.binaries || [];
+    const nonStandard = binaries.filter(b => b.isNonStandard);
+    if (nonStandard.length === 0) {
+      const ok = document.createElement('p');
+      ok.className = 'text-xs text-green-700 bg-green-50 rounded px-2 py-1 font-mono';
+      ok.textContent = 'All standard system binaries.';
+      card.appendChild(ok);
+    } else {
+      const warn = document.createElement('p');
+      warn.className = 'text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-2 font-mono';
+      warn.textContent = `${nonStandard.length} non-standard SUID ${nonStandard.length === 1 ? 'binary' : 'binaries'} detected.`;
+      card.appendChild(warn);
+    }
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1 mt-2';
+    label.textContent = `SUID binaries (${binaries.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    binaries.slice(0, 20).forEach(b => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100' + (b.isNonStandard ? ' bg-amber-50' : '');
+      const pathTd = document.createElement('td');
+      pathTd.className = `py-0.5 pr-3 ${b.isNonStandard ? 'text-amber-700' : 'text-slate-600'}`;
+      pathTd.textContent = b.path;
+      const badgeTd = document.createElement('td');
+      badgeTd.className = 'py-0.5';
+      const badge = document.createElement('span');
+      badge.className = `text-xs px-1.5 py-0.5 rounded ${b.isNonStandard ? 'bg-amber-100 text-amber-700 font-semibold' : 'bg-slate-100 text-slate-500'}`;
+      badge.textContent = b.isNonStandard ? 'non-standard' : 'standard';
+      badgeTd.appendChild(badge);
+      tr.appendChild(pathTd); tr.appendChild(badgeTd);
+      table.appendChild(tr);
+    });
+    if (binaries.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 2; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${binaries.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'history') {
+    const commands = snap.parsed.commands || [];
+    const interesting = commands.filter(c => c.isInteresting);
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Command history (${commands.length})${interesting.length ? ` — ${interesting.length} interesting` : ''}`;
+    card.appendChild(label);
+    // Show interesting first
+    const display = [...commands.filter(c => c.isInteresting).slice(0, 10), ...commands.filter(c => !c.isInteresting)].slice(0, 30);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    display.forEach(c => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const cmdTd = document.createElement('td');
+      cmdTd.className = `py-0.5 ${c.isInteresting ? 'text-amber-700' : 'text-slate-600'} truncate max-w-sm`;
+      cmdTd.textContent = (c.isInteresting ? '⚡ ' : '') + c.cmd;
+      cmdTd.title = c.cmd;
+      tr.appendChild(cmdTd);
+      table.appendChild(tr);
+    });
+    if (commands.length > 30) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${commands.length - 30} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
+    return;
+  }
+
+  if (snap.commandType === 'software') {
+    const packages = snap.parsed.packages || [];
+    const label = document.createElement('p');
+    label.className = 'text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1';
+    label.textContent = `Installed packages (${packages.length})`;
+    card.appendChild(label);
+    const table = document.createElement('table');
+    table.className = 'w-auto text-xs font-mono';
+    packages.slice(0, 20).forEach(pkg => {
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-slate-100';
+      const nameTd = document.createElement('td');
+      nameTd.className = 'py-0.5 pr-3 text-slate-700';
+      nameTd.textContent = pkg.name;
+      const verTd = document.createElement('td');
+      verTd.className = 'py-0.5 pr-3 text-slate-500';
+      verTd.textContent = pkg.version ?? '';
+      const archTd = document.createElement('td');
+      archTd.className = 'py-0.5 text-slate-400';
+      archTd.textContent = pkg.arch ?? '';
+      tr.appendChild(nameTd); tr.appendChild(verTd); tr.appendChild(archTd);
+      table.appendChild(tr);
+    });
+    if (packages.length > 20) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 3; td.className = 'py-1 text-slate-400 text-xs';
+      td.textContent = `…and ${packages.length - 20} more`;
+      tr.appendChild(td); table.appendChild(tr);
+    }
+    card.appendChild(table);
     return;
   }
 }
