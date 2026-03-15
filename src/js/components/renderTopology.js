@@ -419,6 +419,88 @@ function makeLayout(focalId, levels) {
   };
 }
 
+// ── User detail panel ─────────────────────────────────────
+
+function renderUserPanel(panel, userId, topology, onHostClick) {
+  const hostMap  = Object.fromEntries(topology.nodes.map(n => [n.id, n]));
+  const userMap  = Object.fromEntries((topology.users || []).map(u => [u.id, u]));
+  const user     = userMap[userId];
+  if (!user) return;
+
+  const userEdges   = (topology.userEdges || []).filter(ue => ue.userId === userId);
+  const adminHosts  = [...new Map(userEdges.filter(ue => ue.type === 'IS_LOCAL_ADMIN').map(ue => [ue.hostId, hostMap[ue.hostId]])).values()].filter(Boolean);
+  const sessionHosts= [...new Map(userEdges.filter(ue => ue.type === 'HAS_SESSION')   .map(ue => [ue.hostId, hostMap[ue.hostId]])).values()].filter(Boolean);
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'p-4 border-b border-slate-100';
+  const nameRow = document.createElement('div');
+  nameRow.className = 'flex items-center gap-2 flex-wrap';
+  const icon = document.createElement('span');
+  icon.className = 'inline-block w-3 h-3 rotate-45 bg-violet-600 flex-shrink-0';
+  const name = document.createElement('span');
+  name.className = 'font-semibold text-slate-800 text-sm font-mono break-all';
+  name.textContent = user.domain ? `${user.domain}\\${user.username}` : user.username;
+  nameRow.appendChild(icon);
+  nameRow.appendChild(name);
+  if (user.isAdmin) {
+    const badge = document.createElement('span');
+    badge.className = 'text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold flex-shrink-0';
+    badge.textContent = 'Admin';
+    nameRow.appendChild(badge);
+  }
+  header.appendChild(nameRow);
+  panel.appendChild(header);
+
+  function addSection(title, hosts, countColor) {
+    if (!hosts.length) return;
+    const details = document.createElement('details');
+    details.open = true;
+    details.className = 'border-b border-slate-100';
+    const summary = document.createElement('summary');
+    summary.className = 'flex items-center justify-between px-4 py-2.5 cursor-pointer select-none text-xs font-semibold text-slate-500 uppercase tracking-wider hover:bg-slate-50 [list-style:none] [&::-webkit-details-marker]:hidden';
+    const titleSpan = document.createElement('span');
+    titleSpan.textContent = title;
+    const countBadge = document.createElement('span');
+    countBadge.className = `${countColor} text-white text-xs px-1.5 py-0.5 rounded-full font-bold`;
+    countBadge.textContent = hosts.length;
+    summary.appendChild(titleSpan);
+    summary.appendChild(countBadge);
+    details.appendChild(summary);
+    const body = document.createElement('div');
+    body.className = 'px-4 pb-3 pt-1 space-y-1.5';
+    hosts.forEach(h => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2';
+      const dot = document.createElement('span');
+      dot.className = `inline-block w-2 h-2 rounded-full flex-shrink-0 ${
+        h.status === 'compromised' ? 'bg-red-500' : h.status === 'observed' ? 'bg-emerald-500' : 'bg-slate-400'
+      }`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'text-xs text-left text-indigo-600 hover:text-indigo-800 font-mono truncate';
+      btn.textContent = h.hostname || h.ip;
+      btn.title = (h.hostname && h.ip) ? `${h.hostname} (${h.ip})` : (h.ip || h.hostname || '');
+      btn.onclick = () => { if (onHostClick) onHostClick(h.id); };
+      row.appendChild(dot);
+      row.appendChild(btn);
+      body.appendChild(row);
+    });
+    details.appendChild(body);
+    panel.appendChild(details);
+  }
+
+  addSection('Admin on', adminHosts, 'bg-amber-500');
+  addSection('Sessions on', sessionHosts, 'bg-cyan-600');
+
+  if (!adminHosts.length && !sessionHosts.length) {
+    const empty = document.createElement('p');
+    empty.className = 'text-xs text-slate-400 px-4 py-4 italic';
+    empty.textContent = 'No relationships found.';
+    panel.appendChild(empty);
+  }
+}
+
 // ── Tooltip ───────────────────────────────────────────────
 
 function showTooltip(canvas, ele) {
@@ -608,10 +690,22 @@ export async function renderTopology(engagementId, container, onHostClick) {
       return;
     }
 
-    // ── Canvas ────────────────────────────────────────────
+    // ── Canvas + side panel ───────────────────────────────
+    const graphRow = document.createElement('div');
+    graphRow.className = 'flex gap-3 items-start';
+    container.appendChild(graphRow);
+
     const canvas = document.createElement('div');
-    canvas.style.cssText = 'width:100%; height:580px; border-radius:12px; border:1px solid #e2e8f0;';
-    container.appendChild(canvas);
+    canvas.style.cssText = 'flex:1; min-width:0; height:580px; border-radius:12px; border:1px solid #e2e8f0;';
+    graphRow.appendChild(canvas);
+
+    if (isUserFocal) {
+      const panel = document.createElement('div');
+      panel.className = 'w-56 flex-shrink-0 bg-white rounded-xl border border-slate-200 overflow-y-auto';
+      panel.style.maxHeight = '580px';
+      renderUserPanel(panel, focalId, topology, onHostClick);
+      graphRow.appendChild(panel);
+    }
 
     // Compute ego network for layout
     const { levels } = isUserFocal
@@ -648,18 +742,12 @@ export async function renderTopology(engagementId, container, onHostClick) {
       }
     });
 
-    // Click user → set as focal
+    // Click user → set as focal (panel appears via draw); second click clears
     cy.on('tap', 'node[type="user"]', (e) => {
       const id = e.target.data('id');
-      if (isUserFocal && focalId === id) {
-        // Second click on focal user → clear focus
-        focalId = null;
-        draw();
-      } else {
-        focalId = id;
-        picker.value = '';
-        draw();
-      }
+      focalId = (isUserFocal && focalId === id) ? null : id;
+      picker.value = '';
+      draw();
     });
 
     // ── Info bar ──────────────────────────────────────────
