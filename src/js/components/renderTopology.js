@@ -543,7 +543,7 @@ function showTooltip(canvas, ele) {
 
 // ── Main render ───────────────────────────────────────────
 
-export async function renderTopology(engagementId, container, onHostClick) {
+export async function renderTopology(engagementId, container, onHostClick, onUserClick) {
   container.innerHTML = '<p class="text-slate-400 text-sm text-center py-12">Loading topology…</p>';
 
   let topology;
@@ -749,11 +749,23 @@ export async function renderTopology(engagementId, container, onHostClick) {
     });
 
     // Click user → set as focal (panel appears via draw); second click clears
+    // Single tap → focus user; double-tap → navigate to user detail
+    let _userTapTimer = null;
     cy.on('tap', 'node[type="user"]', (e) => {
       const id = e.target.data('id');
-      focalId = (isUserFocal && focalId === id) ? null : id;
-      picker.value = '';
-      draw();
+      if (_userTapTimer?.id === id) {
+        clearTimeout(_userTapTimer.t);
+        _userTapTimer = null;
+        if (onUserClick) onUserClick(id);
+      } else {
+        if (_userTapTimer) clearTimeout(_userTapTimer.t);
+        _userTapTimer = { id, t: setTimeout(() => {
+          _userTapTimer = null;
+          focalId = (isUserFocal && focalId === id) ? null : id;
+          picker.value = '';
+          draw();
+        }, 280) };
+      }
     });
 
     // ── Info bar ──────────────────────────────────────────

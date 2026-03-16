@@ -106,6 +106,7 @@ export async function renderEngagement(engagementId) {
           engagementId,
           topologyContainer,
           (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports)),
+          (userId) => import('./renderUser.js').then(r => r.renderUser(engagementId, userId, data, snapshots, render)),
         )
       );
       return;
