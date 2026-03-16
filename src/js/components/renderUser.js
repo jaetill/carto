@@ -76,6 +76,55 @@ export async function renderUser(engagementId, userId, data, snapshots, onBack) 
     const sections = document.createElement('div');
     sections.className = 'space-y-6';
 
+    // Credentials for this user
+    const userCreds = (data.credentials || []).filter(c =>
+      c.username.toLowerCase() === user.username.toLowerCase()
+    );
+    if (userCreds.length > 0) {
+      const credSection = document.createElement('div');
+      const credHeading = document.createElement('h3');
+      credHeading.className = 'text-sm font-semibold text-slate-600 mb-2';
+      credHeading.textContent = `Credentials (${userCreds.length})`;
+      credSection.appendChild(credHeading);
+
+      const credList = document.createElement('div');
+      credList.className = 'space-y-2';
+      for (const cred of userCreds) {
+        const chip = document.createElement('div');
+        chip.className = 'flex items-center gap-2 bg-white border border-slate-100 rounded-lg px-3 py-2 text-xs';
+        const typeBadge = document.createElement('span');
+        typeBadge.className = `px-2 py-0.5 rounded font-medium ${
+          cred.secretType === 'plaintext' ? 'bg-green-100 text-green-700' :
+          cred.secretType === 'ntlm'      ? 'bg-red-100 text-red-700' :
+          cred.secretType === 'kerberos'  ? 'bg-purple-100 text-purple-700' :
+                                            'bg-orange-100 text-orange-700'
+        }`;
+        typeBadge.textContent = cred.secretType;
+        const secretSpan = document.createElement('span');
+        secretSpan.className = 'font-mono text-slate-500 cursor-pointer hover:text-slate-800';
+        secretSpan.textContent = cred.secret ? '••••••••' : '—';
+        secretSpan.title = 'Click to reveal';
+        let revealed = false;
+        secretSpan.onclick = () => {
+          revealed = !revealed;
+          secretSpan.textContent = revealed
+            ? (cred.crackedValue ? `${cred.crackedValue} (cracked)` : cred.secret || '—')
+            : '••••••••';
+        };
+        chip.appendChild(typeBadge);
+        chip.appendChild(secretSpan);
+        if (cred.notes) {
+          const notes = document.createElement('span');
+          notes.className = 'text-slate-400 ml-auto truncate max-w-[120px]';
+          notes.textContent = cred.notes;
+          chip.appendChild(notes);
+        }
+        credList.appendChild(chip);
+      }
+      credSection.appendChild(credList);
+      sections.appendChild(credSection);
+    }
+
     // Admin on
     sections.appendChild(makeHostSection(
       `Admin on (${adminHostIds.length})`,

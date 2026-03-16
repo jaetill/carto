@@ -43,8 +43,9 @@ export async function saveEngagements(updated) {
 // ── Engagement data (hosts + notes) ──────────────────────
 
 export async function loadEngagementData(engagementId) {
-  if (mockMode) return mockEngagementData[MOCK_ENG_ID] || { hosts: [], notes: [] };
-  return await apiGet(`/engagement/${engagementId}/data`) || { hosts: [], notes: [] };
+  if (mockMode) return mockEngagementData[MOCK_ENG_ID] || { hosts: [], notes: [], credentials: [] };
+  const d = await apiGet(`/engagement/${engagementId}/data`) || {};
+  return { hosts: [], notes: [], credentials: [], ...d };
 }
 
 export async function saveEngagementData(engagementId, data) {
@@ -187,6 +188,23 @@ export function newNote(overrides = {}) {
     hostId:    null, // null = engagement-level
     text:      '',
     timestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+export function newCredential(overrides = {}) {
+  return {
+    id:             crypto.randomUUID(),
+    username:       '',
+    domain:         null,
+    secretType:     'plaintext', // 'plaintext' | 'ntlm' | 'hash' | 'kerberos'
+    secret:         '',
+    cracked:        false,
+    crackedValue:   null,
+    sourceHostId:   null,
+    sourceCommand:  null, // commandType that surfaced it
+    notes:          '',
+    createdAt:      Date.now(),
     ...overrides,
   };
 }

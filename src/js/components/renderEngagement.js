@@ -4,6 +4,7 @@ import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
 import { triggerGraphSync } from '../data/graph.js';
+import { renderCredentialsTab } from './renderCredentials.js';
 
 export async function renderEngagement(engagementId) {
   const container = document.getElementById('app-content');
@@ -20,7 +21,7 @@ export async function renderEngagement(engagementId) {
   let collapsedSubnets = null;
 
   // Tab state
-  let activeTab = 'overview'; // 'overview' | 'analytics' | 'topology' | 'pathing'
+  let activeTab = 'overview'; // 'overview' | 'analytics' | 'credentials' | 'topology' | 'pathing' | 'ingest-errors'
 
   render();
 
@@ -47,6 +48,7 @@ export async function renderEngagement(engagementId) {
     const tabs = [
       { id: 'overview',      label: 'Overview' },
       { id: 'analytics',     label: 'Analytics' },
+      { id: 'credentials',   label: `Credentials${(data.credentials||[]).length > 0 ? ` (${data.credentials.length})` : ''}` },
       { id: 'topology',      label: 'Topology' },
       { id: 'pathing',       label: 'Attack Path' },
       { id: 'ingest-errors', label: ingestErrors.length > 0 ? `Ingest Errors (${ingestErrors.length})` : 'Ingest Errors' },
@@ -69,7 +71,7 @@ export async function renderEngagement(engagementId) {
     });
 
     // Sync button — only on topology/pathing tabs
-    if (activeTab !== 'overview') {
+    if (activeTab === 'topology' || activeTab === 'pathing') {
       const syncBtn = btn('↺ Sync Graph', 'ghost');
       syncBtn.className += ' text-xs ml-auto';
       syncBtn.onclick = async () => {
@@ -108,6 +110,19 @@ export async function renderEngagement(engagementId) {
           (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports)),
           (userId) => import('./renderUser.js').then(r => r.renderUser(engagementId, userId, data, snapshots, render)),
         )
+      );
+      return;
+    }
+
+    if (activeTab === 'credentials') {
+      const credContainer = document.createElement('div');
+      container.appendChild(credContainer);
+      renderCredentialsTab(
+        credContainer,
+        engagementId,
+        data,
+        data.hosts,
+        (hostId) => import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports))
       );
       return;
     }
