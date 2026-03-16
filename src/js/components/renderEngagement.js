@@ -1,5 +1,5 @@
 import { engagements, loadEngagementData, saveEngagementData, loadSnapshots, saveSnapshots, loadImports, saveImports, newHost, newNote, newImport, saveEngagements } from '../data/index.js';
-import { detectFileType, parseNmap, parseMetasploit, parseNessus, parseNuciei, parseSharpHound, parseGhostwriter } from '../data/parsers.js';
+import { detectFileType, parseNmap, parseMetasploit, parseNessus, parseNuciei, parseSharpHound, parseGhostwriter, checkParseQuality } from '../data/parsers.js';
 import { btn } from '../ui/elements.js';
 import { toastSuccess, toastError } from '../ui/toast.js';
 import { renderSidebar } from './renderEngagements.js';
@@ -27,78 +27,29 @@ export async function renderEngagement(engagementId) {
   function render() {
     container.innerHTML = '';
 
-    // ── Header ────────────────────────────────────────────
-    const header = document.createElement('div');
-
-    header.className = 'flex items-start justify-between mb-6';
-
-    const titleBlock = document.createElement('div');
-
-    const nameEl = document.createElement('h2');
-    nameEl.className = 'text-2xl font-bold text-slate-800';
-    nameEl.textContent = eng.name;
-
-    const metaEl = document.createElement('p');
-    metaEl.className = 'text-sm text-slate-400 mt-0.5';
-    metaEl.textContent = [eng.client, eng.startDate].filter(Boolean).join(' · ');
-
-    titleBlock.appendChild(nameEl);
-    titleBlock.appendChild(metaEl);
-
-    const headerActions = document.createElement('div');
-    headerActions.className = 'flex items-center gap-2';
-
-    const badge = document.createElement('span');
-    badge.className = `badge badge-${eng.status}`;
-    badge.textContent = eng.status;
-
+    // ── Edit button (top-right) ───────────────────────────
+    const editRow = document.createElement('div');
+    editRow.className = 'flex justify-end mb-4';
     const editBtn = btn('Edit', 'secondary');
     editBtn.className += ' text-xs';
     editBtn.onclick = () => showEngagementForm();
-
-    headerActions.appendChild(badge);
-    headerActions.appendChild(editBtn);
-    header.appendChild(titleBlock);
-    header.appendChild(headerActions);
-    container.appendChild(header);
-
-    // ── Stats row ─────────────────────────────────────────
-    const stats = document.createElement('div');
-    stats.className = 'grid grid-cols-4 gap-4 mb-6';
-
-    const compromised = data.hosts.filter(h => h.status === 'compromised').length;
-    const snapCount   = snapshots.length;
-    const noteCount   = (data.notes || []).filter(n => !n.hostId).length;
-
-    [
-      { label: 'Hosts',       value: data.hosts.length },
-      { label: 'Compromised', value: compromised, accent: compromised > 0 ? 'text-red-600' : '' },
-      { label: 'Snapshots',   value: snapCount },
-      { label: 'Notes',       value: noteCount },
-    ].forEach(({ label, value, accent = '' }) => {
-      const card = document.createElement('div');
-      card.className = 'bg-white rounded-xl border border-slate-100 p-4';
-      const val = document.createElement('p');
-      val.className = `text-2xl font-bold text-slate-800 ${accent}`;
-      val.textContent = value;
-      const lbl = document.createElement('p');
-      lbl.className = 'text-xs text-slate-400 mt-0.5';
-      lbl.textContent = label;
-      card.appendChild(val);
-      card.appendChild(lbl);
-      stats.appendChild(card);
-    });
-    container.appendChild(stats);
+    editRow.appendChild(editBtn);
+    container.appendChild(editRow);
 
     // ── Tab bar ───────────────────────────────────────────
     const tabBar = document.createElement('div');
     tabBar.className = 'flex items-center gap-1 mb-6 border-b border-slate-200';
 
+    const ingestErrors = snapshots
+      .map(snap => ({ snap, check: checkParseQuality(snap) }))
+      .filter(({ check }) => !check.ok);
+
     const tabs = [
-      { id: 'overview',   label: 'Overview' },
-      { id: 'analytics',  label: 'Analytics' },
-      { id: 'topology',   label: 'Topology' },
-      { id: 'pathing',    label: 'Attack Path' },
+      { id: 'overview',      label: 'Overview' },
+      { id: 'analytics',     label: 'Analytics' },
+      { id: 'topology',      label: 'Topology' },
+      { id: 'pathing',       label: 'Attack Path' },
+      { id: 'ingest-errors', label: ingestErrors.length > 0 ? `Ingest Errors (${ingestErrors.length})` : 'Ingest Errors' },
     ];
 
     tabs.forEach(({ id, label }) => {
@@ -164,6 +115,13 @@ export async function renderEngagement(engagementId) {
       const pathingContainer = document.createElement('div');
       container.appendChild(pathingContainer);
       import('./renderPathing.js').then(m => m.renderPathing(engagementId, pathingContainer));
+      return;
+    }
+
+    if (activeTab === 'ingest-errors') {
+      renderIngestErrorsTab(container, ingestErrors, data.hosts, (hostId) =>
+        import('./renderHost.js').then(r => r.renderHost(engagementId, hostId, data, snapshots, render, imports))
+      );
       return;
     }
 
@@ -1233,4 +1191,70 @@ function renderAnalyticsTab(container, hosts, snapshots, onHostClick) {
     section.appendChild(cards);
     container.appendChild(section);
   }
+}
+
+function renderIngestErrorsTab(container, ingestErrors, hosts, onHostClick) {
+  const hostMap = Object.fromEntries(hosts.map(h => [h.id, h]));
+
+  if (ingestErrors.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'text-center py-16 text-slate-400 text-sm';
+    empty.textContent = 'No parse errors detected across this engagement.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const note = document.createElement('p');
+  note.className = 'text-xs text-slate-400 mb-4';
+  note.textContent = 'These snapshots were parsed but returned empty or unexpected results. The raw output may be in an unsupported format variant.';
+  container.appendChild(note);
+
+  const list = document.createElement('div');
+  list.className = 'space-y-3';
+
+  for (const { snap, check } of ingestErrors) {
+    const host = hostMap[snap.hostId];
+    const card = document.createElement('div');
+    card.className = 'bg-white border border-amber-200 rounded-xl p-4 flex items-start gap-3';
+
+    const icon = document.createElement('span');
+    icon.className = 'text-amber-500 text-lg flex-shrink-0';
+    icon.textContent = '⚠';
+
+    const body = document.createElement('div');
+    body.className = 'flex-1 min-w-0';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'flex items-center gap-2 flex-wrap';
+
+    const typeBadge = document.createElement('span');
+    typeBadge.className = 'text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded';
+    typeBadge.textContent = snap.commandType;
+
+    const hostLink = document.createElement('button');
+    hostLink.type = 'button';
+    hostLink.className = 'text-sm font-medium text-indigo-600 hover:underline truncate';
+    hostLink.textContent = host?.label || host?.ip || snap.hostId;
+    hostLink.onclick = () => onHostClick(snap.hostId);
+
+    const ts = document.createElement('span');
+    ts.className = 'text-xs text-slate-400 ml-auto';
+    ts.textContent = snap.timestamp ? new Date(snap.timestamp).toLocaleString() : '';
+
+    titleRow.appendChild(typeBadge);
+    titleRow.appendChild(hostLink);
+    titleRow.appendChild(ts);
+
+    const msg = document.createElement('p');
+    msg.className = 'text-xs text-amber-700 mt-1';
+    msg.textContent = check.warning;
+
+    body.appendChild(titleRow);
+    body.appendChild(msg);
+    card.appendChild(icon);
+    card.appendChild(body);
+    list.appendChild(card);
+  }
+
+  container.appendChild(list);
 }
