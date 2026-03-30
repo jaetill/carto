@@ -1,3 +1,9 @@
+// graph.mjs — Neo4j Cypher operations for carto engagement topology
+// Manages: hosts, subnets, connections, processes, ports, vulnerabilities,
+//          credentials, users, sessions, shares, attack paths
+// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, NEO4J_DATABASE
+// Called by: sync.mjs (after data saves) and index.mjs (graph/paths routes)
+
 import neo4j from 'neo4j-driver';
 
 // ── Driver ────────────────────────────────────────────────

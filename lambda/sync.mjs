@@ -1,3 +1,10 @@
+// sync.mjs — parses snapshots/imports and syncs extracted relationships to Neo4j
+// Triggered automatically after every POST to /data, /snapshots, /imports
+// Extracts: subnets, network connections, processes, ports, vulns, creds,
+//           users, local admins, sessions, shares
+// Reads from: S3 (snapshots.json, imports.json, data.json)
+// Writes to: Neo4j via graph.mjs
+
 import { s3Get } from './s3.mjs';
 import {
   syncEngagement as graphSyncEngagement,

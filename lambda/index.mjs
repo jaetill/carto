@@ -1,3 +1,18 @@
+// Lambda: cartoApi — single function, routes all API paths via path detection
+//   GET/POST /engagements                     — list/save all engagements
+//   GET/POST /engagement/{id}/data            — hosts, notes, credentials (POST triggers Neo4j sync)
+//   GET/POST /engagement/{id}/snapshots       — command snapshots (POST triggers Neo4j sync)
+//   GET/POST /engagement/{id}/imports         — tool imports (POST triggers Neo4j sync)
+//   GET      /engagement/{id}/graph           — topology graph from Neo4j
+//   GET/POST /engagement/{id}/graph/paths     — attack paths
+//   POST     /engagement/{id}/graph/paths/delete — remove attack path
+//   POST     /engagement/{id}/graph/sync      — force full Neo4j resync
+//
+// Auth: Cognito JWT in Authorization header (validated by API Gateway)
+// S3 bucket: jaetill-carto
+// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, NEO4J_DATABASE
+// Note: ES module (.mjs) — use import/export, not require()
+
 import { s3Get, s3Put }                                    from './s3.mjs';
 import { getTopology, getAttackPaths, addAttackPath, removeAttackPath } from './graph.mjs';
 import { afterDataSave, afterSnapshotSave, afterImportSave, syncEngagementFull } from './sync.mjs';

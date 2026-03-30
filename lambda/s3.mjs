@@ -1,3 +1,6 @@
+// s3.mjs — S3 read/write helpers for bucket jaetill-carto
+// Exports: s3Get(key), s3Put(key, data)
+
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 
 const s3     = new S3Client({ region: 'us-east-2' });
