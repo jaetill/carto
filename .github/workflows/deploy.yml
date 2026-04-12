@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -21,12 +25,30 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-2
 
-      - run: aws s3 sync dist/ s3://jaetill-carto --delete --exclude "engagements.json" --exclude "engagements/*"
-      - run: aws cloudfront create-invalidation --distribution-id E36OPEPVLCLUYJ --paths "/*"
+      - name: Sync HTML to S3 (no-cache)
+        run: |
+          aws s3 sync dist/ s3://jaetill-carto/ \
+            --exclude "*" \
+            --include "*.html" \
+            --cache-control "no-cache" \
+            --delete
+
+      - name: Sync assets to S3 (immutable)
+        run: |
+          aws s3 sync dist/ s3://jaetill-carto/ \
+            --exclude "*.html" \
+            --exclude "engagements.json" \
+            --exclude "engagements/*" \
+            --cache-control "max-age=31536000, immutable"
+
+      - name: Invalidate CloudFront HTML
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id E36OPEPVLCLUYJ \
+            --paths "/index.html" "/login.html"
 
       # ── Lambda deploy ───────────────────────────────────
       - name: Install Lambda dependencies
