@@ -10,7 +10,8 @@
 //
 // Auth: Cognito JWT in Authorization header (validated by API Gateway)
 // S3 bucket: jaetill-carto
-// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, NEO4J_DATABASE
+// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_DATABASE
+// Secret:  NEO4J_PASSWORD via Secrets Manager (carto/secrets) — see graph.mjs
 // Note: ES module (.mjs) — use import/export, not require()
 
 import { s3Get, s3Put }                                    from './s3.mjs';

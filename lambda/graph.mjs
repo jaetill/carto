@@ -1,27 +1,44 @@
 // graph.mjs — Neo4j Cypher operations for carto engagement topology
 // Manages: hosts, subnets, connections, processes, ports, vulnerabilities,
 //          credentials, users, sessions, shares, attack paths
-// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD, NEO4J_DATABASE
+// Env vars: NEO4J_URI, NEO4J_USERNAME, NEO4J_DATABASE
+// Secret:  NEO4J_PASSWORD fetched from AWS Secrets Manager (carto/secrets)
 // Called by: sync.mjs (after data saves) and index.mjs (graph/paths routes)
 
 import neo4j from 'neo4j-driver';
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+
+const smClient = new SecretsManagerClient({ region: 'us-east-2' });
+
+// ── Secrets (cached per cold start) ──────────────────────
+
+let _secrets;
+async function getSecrets() {
+  if (!_secrets) {
+    const res = await smClient.send(new GetSecretValueCommand({ SecretId: 'carto/secrets' }));
+    _secrets = JSON.parse(res.SecretString);
+  }
+  return _secrets;
+}
 
 // ── Driver ────────────────────────────────────────────────
 
 let _driver = null;
 
-function getDriver() {
+async function getDriver() {
   if (!_driver) {
+    const secrets = await getSecrets();
     _driver = neo4j.driver(
       process.env.NEO4J_URI,
-      neo4j.auth.basic(process.env.NEO4J_USERNAME, process.env.NEO4J_PASSWORD),
+      neo4j.auth.basic(process.env.NEO4J_USERNAME, secrets.NEO4J_PASSWORD),
     );
   }
   return _driver;
 }
 
 async function run(cypher, params = {}) {
-  const session = getDriver().session({ database: process.env.NEO4J_DATABASE });
+  const driver = await getDriver();
+  const session = driver.session({ database: process.env.NEO4J_DATABASE });
   try {
     const result = await session.run(cypher, params);
     return result.records;

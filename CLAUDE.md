@@ -35,13 +35,16 @@ Hosted at **https://carto.jaetill.com**.
 | GitHub deploy role | `carto-github-deploy` (OIDC) |
 | Region | `us-east-2` |
 
-## Lambda env vars (`cartoApi`)
+## Lambda config (`cartoApi`)
+**Env vars:**
 | Var | Purpose |
 |---|---|
 | `NEO4J_URI` | Bolt URI (e.g. `neo4j+s://...`) |
 | `NEO4J_USERNAME` | Neo4j username |
-| `NEO4J_PASSWORD` | Neo4j password |
 | `NEO4J_DATABASE` | Neo4j database name |
+
+**Secrets Manager:** `carto/secrets` stores `NEO4J_PASSWORD`. Fetched once per
+cold start (~50-100ms) and cached in memory for reuse across warm invocations.
 
 ## API routes (`9o7c3668a4/prod`)
 All routes require `Authorization: {CognitoIdToken}` header. All handled by
