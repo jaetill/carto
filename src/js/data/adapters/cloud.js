@@ -1,10 +1,9 @@
-import { Auth } from 'aws-amplify';
+import { getIdToken } from '../../auth.js';
 
 const API_URL = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
 export async function apiGet(path) {
-  const session = await Auth.currentSession();
-  const token   = session.getIdToken().getJwtToken();
+  const token = getIdToken();
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: token },
   });
@@ -14,8 +13,7 @@ export async function apiGet(path) {
 }
 
 export async function apiPost(path, body) {
-  const session = await Auth.currentSession();
-  const token   = session.getIdToken().getJwtToken();
+  const token = getIdToken();
   const res = await fetch(`${API_URL}${path}`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json', Authorization: token },

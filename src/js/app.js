@@ -1,11 +1,12 @@
-import { Amplify, Auth } from 'aws-amplify';
-import amplifyConfig, { DEBUG_MODE } from './config.js';
+import { isAuthenticated, startLogin, logout, parseIdToken } from './auth.js';
+import { DEBUG_MODE } from './config.js';
 import { loadEngagements } from './data/index.js';
 import { renderSidebar } from './components/renderEngagements.js';
 import { renderEngagement } from './components/renderEngagement.js';
 import { setNavigate, setCurrentEngagement } from './nav.js';
 
-Amplify.configure(amplifyConfig);
+const PORTAL_URL     = 'https://jaetill.com';
+const REQUIRED_GROUP = 'carto-users';
 
 async function navigate(engagementId) {
   setCurrentEngagement(engagementId);
@@ -22,20 +23,23 @@ function showWelcome() {
   el.innerHTML = '<p class="text-slate-400 text-sm text-center py-24">Select an engagement from the sidebar.</p>';
 }
 
-document.getElementById('sign-out-btn').addEventListener('click', async () => {
-  await Auth.signOut();
-  window.location.href = 'login.html';
-});
+document.getElementById('sign-out-btn').addEventListener('click', () => logout());
 
 document.getElementById('new-eng-btn').addEventListener('click', () => {
   import('./components/renderEngagements.js').then(m => m.showNewEngagementForm());
 });
 
 async function init() {
-  try {
-    await Auth.currentAuthenticatedUser();
-  } catch {
-    window.location.href = 'login.html';
+  // Auth gate
+  if (!isAuthenticated()) {
+    return startLogin();
+  }
+
+  // Authz gate: must be in carto-users group
+  const claims = parseIdToken() || {};
+  const groups = Array.isArray(claims['cognito:groups']) ? claims['cognito:groups'] : [];
+  if (!groups.includes(REQUIRED_GROUP)) {
+    window.location.replace(PORTAL_URL);
     return;
   }
 

@@ -42,11 +42,25 @@ async function graphSync(label, fn) {
   }
 }
 
+// ── Group authz ───────────────────────────────────────────
+
+function requireGroup(event, group) {
+  const claim = event.requestContext?.authorizer?.claims?.['cognito:groups'];
+  const groups = Array.isArray(claim)
+    ? claim
+    : String(claim || '').replace(/^\[|\]$/g, '').split(/[\s,]+/).filter(Boolean);
+  return groups.includes(group);
+}
+
 // ── Handler ───────────────────────────────────────────────
 
 export const handler = async (event) => {
   const method = event.httpMethod;
   const path   = event.path;
+
+  if (!requireGroup(event, 'carto-users')) {
+    return respond(403, { error: 'Forbidden: not a carto-users group member' });
+  }
 
   try {
 

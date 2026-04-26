@@ -25,8 +25,7 @@ export default defineConfig(({ mode }) => {
       alias: [
         {
           // @carto/api is the switchable storage adapter.
-          // In standalone builds: localStorage (no Amplify).
-          // In cloud builds: Cognito + API Gateway.
+          // standalone: localStorage; cloud: API Gateway with Cognito JWT
           find: '@carto/api',
           replacement: isLocal
             ? resolve(__dirname, 'src/js/data/adapters/local.js')
@@ -41,8 +40,8 @@ export default defineConfig(({ mode }) => {
         input: isLocal
           ? resolve(__dirname, 'index.local.html')
           : {
-              main:  resolve(__dirname, 'index.html'),
-              login: resolve(__dirname, 'login.html'),
+              main:     resolve(__dirname, 'index.html'),
+              callback: resolve(__dirname, 'callback.html'),
             },
       },
     },

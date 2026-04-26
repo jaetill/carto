@@ -20,7 +20,11 @@ Hosted at **https://carto.jaetill.com**.
 - **Graph DB**: **Neo4j** — Lambda connects via env vars; all topology/relationship
   queries go through `graph.mjs`.
 - **Storage**: S3 bucket `jaetill-carto` (private) for JSON persistence.
-- **Auth**: Cognito user pool `us-east-2_yztvpLyo6`, client `u7mfkb5p5edb5fn358bavfbgl`.
+- **Auth**: Cognito Hosted UI on shared pool `us-east-2_xneeJzaDJ`, client `3r633l045s8fse9v1ebubk8re6`,
+  managed-login branding `ffc6f1fe-5324-4e48-aee3-3788635546f8`. OAuth Authorization Code + PKCE,
+  hand-rolled in `src/js/auth.js` (no `aws-amplify` dependency).
+- **Authz**: Group `carto-users` required. Frontend `app.js` redirects non-members
+  to portal; Lambda `cartoApi` returns 403 if claim missing.
   All API routes require Cognito JWT in `Authorization` header.
 
 ## AWS resources
@@ -29,7 +33,10 @@ Hosted at **https://carto.jaetill.com**.
 | S3 bucket | `jaetill-carto` |
 | CloudFront distribution | `E36OPEPVLCLUYJ` → `carto.jaetill.com` |
 | API Gateway | `9o7c3668a4` (prod stage) |
-| Cognito user pool | `us-east-2_yztvpLyo6` |
+| Cognito user pool | `us-east-2_xneeJzaDJ` (shared with portal, meal-planner, game-night) |
+| Cognito web client | `3r633l045s8fse9v1ebubk8re6` |
+| Cognito branding | `ffc6f1fe-5324-4e48-aee3-3788635546f8` |
+| API GW Cognito authorizer | `b7mlmb` |
 | Lambda function | `cartoApi` |
 | Lambda execution role | `cartoApi-role` |
 | GitHub deploy role | `carto-github-deploy` (OIDC) |

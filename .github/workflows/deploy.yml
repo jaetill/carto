@@ -48,7 +48,7 @@ jobs:
         run: |
           aws cloudfront create-invalidation \
             --distribution-id E36OPEPVLCLUYJ \
-            --paths "/index.html" "/login.html"
+            --paths "/index.html" "/callback.html"
 
       # ── Lambda deploy ───────────────────────────────────
       - name: Install Lambda dependencies
