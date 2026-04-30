@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # ── Frontend build ──────────────────────────────────
@@ -51,17 +51,11 @@ jobs:
             --paths "/index.html" "/callback.html"
 
       # ── Lambda deploy ───────────────────────────────────
-      - name: Install Lambda dependencies
-        run: npm ci
-        working-directory: lambda
-
-      - name: Package Lambda
-        run: zip -r ../lambda-deploy.zip .
-        working-directory: lambda
-
-      - name: Deploy Lambda
+      - name: Ensure Lambda runtime is nodejs22.x
         run: |
-          aws lambda update-function-code \
-            --function-name cartoApi \
-            --region us-east-2 \
-            --zip-file fileb://lambda-deploy.zip
+          current=$(aws lambda get-function-configuration --function-name cartoApi --region us-east-2 --query 'Runtime' --output text)
+          if [ "$current" != "nodejs22.x" ]; then
+            echo "Updating cartoApi from $current to nodejs22.x"
+            aws lambda update-function-configuration \
+              --function-name cartoApi \
+ 
