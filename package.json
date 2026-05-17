@@ -18,6 +18,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@sentry/browser": "^10.53.1",
     "@tailwindcss/vite": "^4.2.1",
     "cytoscape": "^3.31.0",
     "jszip": "^3.10.1",

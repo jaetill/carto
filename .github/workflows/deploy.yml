@@ -11,6 +11,10 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+      SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -22,6 +26,27 @@ jobs:
       # ── Frontend build ──────────────────────────────────
       - run: npm ci
       - run: npm run build
+        env:
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          VITE_DEPLOY_ENV: production
+          VITE_RELEASE_VERSION: ${{ github.sha }}
+      # ── Sentry release + source map upload (BEFORE aws auth) ──
+      - name: Upload source maps to Sentry
+        if: env.SENTRY_AUTH_TOKEN != ''
+        uses: getsentry/action-release@v1
+        with:
+          version: ${{ github.sha }}
+          environment: production
+          sourcemaps: ./dist
+          set_commits: auto
+          finalize: true
+      - name: Strip source maps from dist/ before publish
+        if: always()
+        run: |
+          find dist -name '*.map' -type f -delete
+          find dist -name '*.js' -type f -exec sed -i '/\/\/# sourceMappingURL=/d' {} +
+          find dist -name '*.css' -type f -exec sed -i '/\/\*# sourceMappingURL=/d' {} +
+
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
