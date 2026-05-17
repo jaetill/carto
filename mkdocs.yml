@@ -34,3 +34,5 @@ nav:
   - Runbooks:
     - Index: runbooks/index.md
     - Deploy: runbooks/deploy.md
+  - Audits:
+      - 'IAM Audit': iam-audit.md
