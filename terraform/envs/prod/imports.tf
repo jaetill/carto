@@ -15,13 +15,12 @@ import {
   id = "jaetill-carto"
 }
 
-# Pending IAM fix:
-# import {
-#   to = aws_cloudfront_origin_access_control.main
-#   id = "E1GXIADC14HCG5"
-# }
-#
-# import {
-#   to = aws_cloudfront_distribution.main
-#   id = "E36OPEPVLCLUYJ"
-# }
+import {
+  to = aws_cloudfront_origin_access_control.main
+  id = "E1GXIADC14HCG5"
+}
+
+import {
+  to = aws_cloudfront_distribution.main
+  id = "E36OPEPVLCLUYJ"
+}
