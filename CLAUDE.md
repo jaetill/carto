@@ -141,3 +141,18 @@ ui/toast.js                   — toast notifications
   differently in cloud vs standalone mode.
 - The standalone build (`npm run build:local`) produces a single self-contained
   HTML file for offline use — no AWS dependencies.
+
+
+---
+
+## Platform inheritance
+
+This project adopts the [Agentic Dev Environment](https://github.com/jaetill/agentic-dev-environment) platform per [ADR-0001](docs/adr/0001-platform-adoption.md).
+
+### AI configuration
+
+The platform's subagents, slash commands, and hooks are delivered via the `ai-team` plugin subscription (per workspace ADR-0015). `.claude/settings.json` retains only the plugin subscription, permissions block, and marketplace pointer.
+
+### Finding lifecycle (per workspace ADR-0016)
+
+Reviewer agents calibrate severity, low/nit findings get `deferred-until-adjacent`, Sentry/critical issues auto-trigger the implementer.
