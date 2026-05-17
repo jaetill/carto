@@ -7,3 +7,15 @@ dist-local/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/mcp.json
+
+# Claude Code artifacts
+.claude/audit.log
+.claude/sessions/
+.claude/worktrees/
+.claude/settings.local.json
+
+# MkDocs build output
+site/
+
+# ESLint cache
+.eslintcache
