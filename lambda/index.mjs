@@ -14,6 +14,7 @@
 // Secret:  NEO4J_PASSWORD via Secrets Manager (carto/secrets) — see graph.mjs
 // Note: ES module (.mjs) — use import/export, not require()
 
+import { Sentry } from './lib/sentry.mjs';
 import { s3Get, s3Put }                                    from './s3.mjs';
 import { getTopology, getAttackPaths, addAttackPath, removeAttackPath } from './graph.mjs';
 import { afterDataSave, afterSnapshotSave, afterImportSave, syncEngagementFull } from './sync.mjs';
@@ -54,7 +55,7 @@ function requireGroup(event, group) {
 
 // ── Handler ───────────────────────────────────────────────
 
-export const handler = async (event) => {
+export const handler = Sentry.wrapHandler(async (event) => {
   const method = event.httpMethod;
   const path   = event.path;
 
@@ -185,4 +186,4 @@ export const handler = async (event) => {
     console.error(e);
     return respond(500, { error: e.message });
   }
-};
+});
