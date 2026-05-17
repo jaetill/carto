@@ -30,6 +30,7 @@ jobs:
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
           VITE_DEPLOY_ENV: production
           VITE_RELEASE_VERSION: ${{ github.sha }}
+
       # ── Sentry release + source map upload (BEFORE aws auth) ──
       - name: Upload source maps to Sentry
         if: env.SENTRY_AUTH_TOKEN != ''
@@ -46,7 +47,6 @@ jobs:
           find dist -name '*.map' -type f -delete
           find dist -name '*.js' -type f -exec sed -i '/\/\/# sourceMappingURL=/d' {} +
           find dist -name '*.css' -type f -exec sed -i '/\/\*# sourceMappingURL=/d' {} +
-
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -83,4 +83,24 @@ jobs:
             echo "Updating cartoApi from $current to nodejs22.x"
             aws lambda update-function-configuration \
               --function-name cartoApi \
- 
+              --runtime nodejs22.x \
+              --region us-east-2 >/dev/null
+            aws lambda wait function-updated --function-name cartoApi --region us-east-2
+          else
+            echo "cartoApi already on nodejs22.x"
+          fi
+
+      - name: Install Lambda dependencies
+        run: npm ci
+        working-directory: lambda
+
+      - name: Package Lambda
+        run: zip -r ../lambda-deploy.zip .
+        working-directory: lambda
+
+      - name: Deploy Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name cartoApi \
+            --region us-east-2 \
+            --zip-file fileb://lambda-deploy.zip
