@@ -1,3 +1,4 @@
+import './feedback.js';
 import { isAuthenticated, startLogin, logout, parseIdToken } from './auth.js';
 import { DEBUG_MODE } from './config.js';
 import { loadEngagements } from './data/index.js';

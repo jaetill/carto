@@ -333,3 +333,82 @@ resource "aws_lambda_permission" "apigw_cartoapi" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "arn:aws:execute-api:${var.aws_region}:${var.aws_account_id}:${aws_api_gateway_rest_api.carto_rest.id}/*/*"
 }
+
+# ── /feedback endpoint (unauthenticated, on REST API carto_rest) ─────────
+
+resource "aws_api_gateway_resource" "carto_rest_feedback" {
+  rest_api_id = aws_api_gateway_rest_api.carto_rest.id
+  parent_id   = aws_api_gateway_rest_api.carto_rest.root_resource_id
+  path_part   = "feedback"
+}
+
+resource "aws_api_gateway_method" "carto_rest_feedback_post" {
+  rest_api_id      = aws_api_gateway_rest_api.carto_rest.id
+  resource_id      = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method      = "POST"
+  authorization    = "NONE"
+  api_key_required = false
+}
+
+resource "aws_api_gateway_integration" "carto_rest_feedback_post" {
+  rest_api_id             = aws_api_gateway_rest_api.carto_rest.id
+  resource_id             = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method             = aws_api_gateway_method.carto_rest_feedback_post.http_method
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.feedback.invoke_arn
+  integration_http_method = "POST"
+  timeout_milliseconds    = 29000
+}
+
+resource "aws_api_gateway_method" "carto_rest_feedback_options" {
+  rest_api_id      = aws_api_gateway_rest_api.carto_rest.id
+  resource_id      = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method      = "OPTIONS"
+  authorization    = "NONE"
+  api_key_required = false
+}
+
+resource "aws_api_gateway_method_response" "carto_rest_feedback_options_200" {
+  rest_api_id = aws_api_gateway_rest_api.carto_rest.id
+  resource_id = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method = aws_api_gateway_method.carto_rest_feedback_options.http_method
+  status_code = "200"
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration" "carto_rest_feedback_options" {
+  rest_api_id          = aws_api_gateway_rest_api.carto_rest.id
+  resource_id          = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method          = aws_api_gateway_method.carto_rest_feedback_options.http_method
+  type                 = "MOCK"
+  request_templates    = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+  passthrough_behavior = "WHEN_NO_MATCH"
+  timeout_milliseconds = 29000
+}
+
+resource "aws_api_gateway_integration_response" "carto_rest_feedback_options_200" {
+  rest_api_id = aws_api_gateway_rest_api.carto_rest.id
+  resource_id = aws_api_gateway_resource.carto_rest_feedback.id
+  http_method = aws_api_gateway_method.carto_rest_feedback_options.http_method
+  status_code = aws_api_gateway_method_response.carto_rest_feedback_options_200.status_code
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://carto.jaetill.com'"
+  }
+  depends_on = [aws_api_gateway_integration.carto_rest_feedback_options]
+}
+
+resource "aws_lambda_permission" "apigw_feedback" {
+  statement_id  = "apigw-feedback"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.feedback.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "arn:aws:execute-api:${var.aws_region}:${var.aws_account_id}:${aws_api_gateway_rest_api.carto_rest.id}/*/POST/feedback"
+}

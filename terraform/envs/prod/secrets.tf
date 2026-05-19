@@ -12,3 +12,8 @@ resource "aws_cloudwatch_log_group" "cartoapi" {
     ignore_changes = [tags, tags_all]
   }
 }
+
+resource "aws_secretsmanager_secret" "github_token" {
+  name        = "carto/github-token"
+  description = "GitHub PAT for feedback Lambda to file user-feedback issues on jaetill/carto"
+}
