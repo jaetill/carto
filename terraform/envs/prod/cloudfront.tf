@@ -1,8 +1,5 @@
 # CloudFront distribution E36OPEPVLCLUYJ - carto.jaetill.com.
 # OAC E1GXIADC14HCG5 restricts S3 access to this distribution.
-#
-# CURRENTLY DISABLED: jaetill-dev IAM user is missing cloudfront:ListTagsForResource.
-# Rename to cloudfront.tf once the IAM gap is closed (see imports.tf comments).
 
 resource "aws_cloudfront_origin_access_control" "main" {
   name                              = "carto-oac"
@@ -13,11 +10,13 @@ resource "aws_cloudfront_origin_access_control" "main" {
 }
 
 resource "aws_cloudfront_distribution" "main" {
-  enabled         = true
-  comment         = "Carto app"
-  price_class     = "PriceClass_100"
-  is_ipv6_enabled = true
-  aliases         = ["carto.jaetill.com"]
+  enabled             = true
+  comment             = "Carto app"
+  price_class         = "PriceClass_All"
+  is_ipv6_enabled     = true
+  aliases             = ["carto.jaetill.com"]
+  default_root_object = "index.html"
+  http_version        = "http2"
 
   origin {
     domain_name              = aws_s3_bucket.main.bucket_regional_domain_name
@@ -34,11 +33,15 @@ resource "aws_cloudfront_distribution" "main" {
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
+    compress               = true
+    cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
 
-    forwarded_values {
-      query_string = false
-      cookies { forward = "none" }
-    }
+  custom_error_response {
+    error_code            = 404
+    response_code         = 200
+    response_page_path    = "/index.html"
+    error_caching_min_ttl = 0
   }
 
   viewer_certificate {
@@ -48,13 +51,6 @@ resource "aws_cloudfront_distribution" "main" {
     ssl_support_method             = "sni-only"
   }
 
-
-  custom_error_response {
-    error_code            = 404
-    response_code         = 200
-    response_page_path    = "/index.html"
-    error_caching_min_ttl = 0
-  }
   restrictions {
     geo_restriction {
       restriction_type = "none"
