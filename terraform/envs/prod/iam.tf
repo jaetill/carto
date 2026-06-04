@@ -126,8 +126,18 @@ resource "aws_iam_role_policy" "github_deploy" {
           "lambda:GetFunction",
           "lambda:GetFunctionConfiguration",
           "lambda:UpdateFunctionConfiguration",
+          "lambda:PublishVersion",
         ]
         Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "lambda:CreateAlias",
+          "lambda:UpdateAlias",
+          "lambda:GetAlias",
+        ]
+        Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi:*"
       }
     ]
   })
