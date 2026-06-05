@@ -15,7 +15,8 @@
 // Note: ES module (.mjs) — use import/export, not require()
 
 import { Sentry } from './lib/sentry.mjs';
-import { s3Get, s3Put }                                    from './s3.mjs';
+import { handler as feedbackHandler } from './feedback.mjs';
+import { s3Get, s3Put } from './s3.mjs';
 import { getTopology, getAttackPaths, addAttackPath, removeAttackPath } from './graph.mjs';
 import { afterDataSave, afterSnapshotSave, afterImportSave, syncEngagementFull } from './sync.mjs';
 
@@ -25,7 +26,7 @@ function respond(statusCode, body) {
   return {
     statusCode,
     headers: {
-      'Content-Type':                'application/json',
+      'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Authorization,Content-Type',
     },
@@ -49,22 +50,29 @@ function requireGroup(event, group) {
   const claim = event.requestContext?.authorizer?.claims?.['cognito:groups'];
   const groups = Array.isArray(claim)
     ? claim
-    : String(claim || '').replace(/^\[|\]$/g, '').split(/[\s,]+/).filter(Boolean);
+    : String(claim || '')
+        .replace(/^\[|\]$/g, '')
+        .split(/[\s,]+/)
+        .filter(Boolean);
   return groups.includes(group);
 }
 
 // ── Handler ───────────────────────────────────────────────
 
-export const handler = Sentry.wrapHandler(async (event) => {
+export const handler = Sentry.wrapHandler(async (event, context) => {
   const method = event.httpMethod;
-  const path   = event.path;
+  const path = event.path;
+
+  // Feedback is public — bypass group check; feedbackHandler enforces its own rate limit
+  if (path === '/feedback') {
+    return feedbackHandler(event, context);
+  }
 
   if (!requireGroup(event, 'carto-users')) {
     return respond(403, { error: 'Forbidden: not a carto-users group member' });
   }
 
   try {
-
     // ── Engagements ──────────────────────────────────────
 
     if (method === 'GET' && path === '/engagements') {
@@ -89,7 +97,7 @@ export const handler = Sentry.wrapHandler(async (event) => {
 
     if (method === 'POST' && dataMatch) {
       const engId = dataMatch[1];
-      const body  = JSON.parse(event.body);
+      const body = JSON.parse(event.body);
       await s3Put(`engagements/${engId}/data.json`, body);
       await graphSync('data', () => afterDataSave(engId, body));
       return respond(200, { ok: true });
@@ -105,7 +113,7 @@ export const handler = Sentry.wrapHandler(async (event) => {
     }
 
     if (method === 'POST' && snapMatch) {
-      const engId     = snapMatch[1];
+      const engId = snapMatch[1];
       const snapshots = JSON.parse(event.body);
       await s3Put(`engagements/${engId}/snapshots.json`, snapshots);
       await graphSync('snapshots', async () => {
@@ -125,7 +133,7 @@ export const handler = Sentry.wrapHandler(async (event) => {
     }
 
     if (method === 'POST' && importsMatch) {
-      const engId   = importsMatch[1];
+      const engId = importsMatch[1];
       const imports = JSON.parse(event.body);
       await s3Put(`engagements/${engId}/imports.json`, imports);
       await graphSync('imports', async () => {
@@ -155,7 +163,7 @@ export const handler = Sentry.wrapHandler(async (event) => {
 
     if (method === 'POST' && pathsMatch) {
       const engId = pathsMatch[1];
-      const body  = JSON.parse(event.body);
+      const body = JSON.parse(event.body);
       await addAttackPath(engId, body);
       return respond(200, { ok: true });
     }
@@ -181,7 +189,6 @@ export const handler = Sentry.wrapHandler(async (event) => {
     }
 
     return respond(404, { error: 'Not found' });
-
   } catch (e) {
     console.error(e);
     return respond(500, { error: e.message });
