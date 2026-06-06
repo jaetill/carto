@@ -2,14 +2,16 @@
 #
 # Plans terraform/envs/prod on PRs (and is available for a future drift
 # detector) under ReadOnlyAccess + tfstate read. Trust gates assume-role on
-# this repo's GitHub OIDC for the default branch (master) and pull_request.
+# this repo's GitHub OIDC for the default branch (master) and the iac-plan
+# GitHub Environment (human-gated — requires reviewer approval before the
+# environment is entered, so fork PRs cannot auto-assume the role).
 # Created out-of-band 2026-06-05 (platform #280) and imported here so it is
 # Terraform-managed. Mirrors game-night-pwa's iac_drift role.
 
 resource "aws_iam_role" "iac_drift" {
   name               = "carto-iac-drift"
   assume_role_policy = data.aws_iam_policy_document.iac_drift_trust.json
-  description        = "Read-only OIDC role for the ADR-0035 iac-additive-guard (plan PR branches). Trusts master + pull_request."
+  description        = "Read-only OIDC role for the ADR-0035 iac-additive-guard (plan PR branches). Trusts master + iac-plan environment (human-gated)."
 }
 
 data "aws_iam_policy_document" "iac_drift_trust" {
@@ -30,7 +32,7 @@ data "aws_iam_policy_document" "iac_drift_trust" {
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:jaetill/carto:ref:refs/heads/master",
-        "repo:jaetill/carto:pull_request",
+        "repo:jaetill/carto:environment:iac-plan",
       ]
     }
   }
