@@ -191,6 +191,6 @@ export const handler = Sentry.wrapHandler(async (event, context) => {
     return respond(404, { error: 'Not found' });
   } catch (e) {
     console.error(e);
-    return respond(500, { error: e.message });
+    return respond(500, { error: 'internal_error' });
   }
 });
