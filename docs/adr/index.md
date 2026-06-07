@@ -5,3 +5,4 @@ Decisions and tradeoffs in [MADR 4.x](https://adr.github.io/madr/) format. Templ
 | # | Title | Status |
 |---|---|---|
 | [0001](0001-platform-adoption.md) | Adopt the Agentic Dev Environment platform | Accepted |
+| [0002](0002-dynamodb-rate-limiting.md) | Use DynamoDB for feedback rate limiting | Proposed |
