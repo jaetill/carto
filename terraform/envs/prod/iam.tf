@@ -128,7 +128,10 @@ resource "aws_iam_role_policy" "github_deploy" {
           "lambda:UpdateFunctionConfiguration",
           "lambda:PublishVersion",
         ]
-        Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi"
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi",
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:carto-feedback",
+        ]
       },
       {
         Effect = "Allow"
@@ -137,7 +140,10 @@ resource "aws_iam_role_policy" "github_deploy" {
           "lambda:UpdateAlias",
           "lambda:GetAlias",
         ]
-        Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi:*"
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:cartoApi:*",
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:carto-feedback:*",
+        ]
       }
     ]
   })
@@ -167,6 +173,22 @@ resource "aws_iam_role_policy" "feedback_secrets" {
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
         Resource = aws_secretsmanager_secret.github_token.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "feedback_dynamodb" {
+  name = "rate-limit-dynamodb"
+  role = aws_iam_role.feedback.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "dynamodb:UpdateItem"
+        Resource = aws_dynamodb_table.rate_limits.arn
       }
     ]
   })

@@ -38,11 +38,12 @@ resource "aws_lambda_function" "feedback" {
 
   environment {
     variables = {
-      GITHUB_REPO_OWNER = "jaetill"
-      GITHUB_REPO_NAME  = "carto"
-      GITHUB_SECRET_ID  = "carto/github-token"
-      DEPLOY_ENV        = "production"
-      LOG_LEVEL         = "INFO"
+      GITHUB_REPO_OWNER  = "jaetill"
+      GITHUB_REPO_NAME   = "carto"
+      GITHUB_SECRET_ID   = "carto/github-token"
+      DEPLOY_ENV         = "production"
+      LOG_LEVEL          = "INFO"
+      RATE_LIMIT_TABLE   = aws_dynamodb_table.rate_limits.name
     }
   }
 
