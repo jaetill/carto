@@ -15,7 +15,7 @@
 // Note: ES module (.mjs) — use import/export, not require()
 
 import { Sentry } from './lib/sentry.mjs';
-import { handler as feedbackHandler } from './feedback.mjs';
+import { feedbackHandler } from './feedback.mjs';
 import { s3Get, s3Put } from './s3.mjs';
 import { getTopology, getAttackPaths, addAttackPath, removeAttackPath } from './graph.mjs';
 import { afterDataSave, afterSnapshotSave, afterImportSave, syncEngagementFull } from './sync.mjs';
