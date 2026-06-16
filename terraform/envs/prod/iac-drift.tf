@@ -48,7 +48,12 @@ data "aws_iam_policy_document" "iac_drift_plan" {
       "iam:ListAttachedRolePolicies",
       "iam:ListRolePolicies",
     ]
-    resources = ["*"]
+    resources = [
+      "arn:aws:iam::${var.aws_account_id}:role/cartoApi-role",
+      "arn:aws:iam::${var.aws_account_id}:role/carto-github-deploy",
+      "arn:aws:iam::${var.aws_account_id}:role/carto-iac-drift",
+      "arn:aws:iam::${var.aws_account_id}:role/carto-feedback-role",
+    ]
   }
 
   statement {
