@@ -68,7 +68,10 @@ data "aws_iam_policy_document" "iac_drift_plan" {
     sid     = "APIGatewayRead"
     effect  = "Allow"
     actions = ["apigateway:GET"]
-    resources = ["*"]
+    resources = [
+      "arn:aws:apigateway:${var.aws_region}::/restapis/9o7c3668a4",
+      "arn:aws:apigateway:${var.aws_region}::/restapis/9o7c3668a4/*",
+    ]
   }
 
   statement {
