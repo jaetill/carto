@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0](https://github.com/jaetill/carto/compare/v1.0.0...v1.1.0) (2026-06-18)
+
+
+### Features
+
+* **iac:** add ADR-0035 iac-additive-guard caller ([#280](https://github.com/jaetill/carto/issues/280)) ([#47](https://github.com/jaetill/carto/issues/47)) ([bedfbd6](https://github.com/jaetill/carto/commit/bedfbd690b5233920b431ec625ddf3f27a40e532))
+* **iam:** grant Lambda alias permissions to carto-github-deploy (ADR-0043 phase 2) ([#35](https://github.com/jaetill/carto/issues/35)) ([e11a2c9](https://github.com/jaetill/carto/commit/e11a2c904e58224329c2808f9e431b049052b16d))
+
+
+### Bug Fixes
+
+* **ci:** scope reusable secrets explicitly (ADR-0048) ([#74](https://github.com/jaetill/carto/issues/74)) ([a395e64](https://github.com/jaetill/carto/commit/a395e6469be29ca286a3fe42f6eaa14af3e24d91))
+* **config:** export API_BASE so feedback.js import resolves at build time ([#36](https://github.com/jaetill/carto/issues/36)) ([f49e749](https://github.com/jaetill/carto/commit/f49e749987fc159dac51c36922c8ee0f11357430)), closes [#27](https://github.com/jaetill/carto/issues/27)
+* **iac:** gate carto-iac-drift on iac-plan environment, not pull_request sub ([#52](https://github.com/jaetill/carto/issues/52)) ([#57](https://github.com/jaetill/carto/issues/57)) ([90bcd10](https://github.com/jaetill/carto/commit/90bcd101ee4e94e89fa44b154c324b6e45f62f7c))
+* **iac:** replace ReadOnlyAccess with scoped plan policy on iac-drift role ([#53](https://github.com/jaetill/carto/issues/53)) ([#68](https://github.com/jaetill/carto/issues/68)) ([2b758a7](https://github.com/jaetill/carto/commit/2b758a74f754375bc037d773481d70237706c317))
+* **iac:** scope APIGatewayRead to carto REST API, not wildcard ([#71](https://github.com/jaetill/carto/issues/71)) ([#72](https://github.com/jaetill/carto/issues/72)) ([71c2c16](https://github.com/jaetill/carto/commit/71c2c1620177c763059c085564c42deb4adf9412))
+* **iac:** scope IAMRead to carto role ARNs, not wildcard ([#70](https://github.com/jaetill/carto/issues/70)) ([#73](https://github.com/jaetill/carto/issues/73)) ([89c414c](https://github.com/jaetill/carto/commit/89c414ca45c7612ebe247af8d2c2cec97b081b70))
+* **iam:** accept environment-scoped OIDC sub for gated prod deploys (ADR-0043) ([#28](https://github.com/jaetill/carto/issues/28)) ([9882b92](https://github.com/jaetill/carto/commit/9882b92bf7a708608a67e6b83e4155174dd0bf87))
+* **lambda:** route POST /feedback to feedbackHandler, bypassing group check ([#38](https://github.com/jaetill/carto/issues/38)) ([#39](https://github.com/jaetill/carto/issues/39)) ([67acb62](https://github.com/jaetill/carto/commit/67acb62d57eaa83a8e7bcee23df8ba4b79a67244))
+* **lambda:** suppress raw exception messages from 500 responses ([#62](https://github.com/jaetill/carto/issues/62)) ([b6acb75](https://github.com/jaetill/carto/commit/b6acb75119ad8fe7e9b68726783f3bb8daab8d3e)), closes [#59](https://github.com/jaetill/carto/issues/59)
+
 ## 1.0.0 (2026-05-23)
 
 
