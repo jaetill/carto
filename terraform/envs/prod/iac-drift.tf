@@ -168,3 +168,9 @@ resource "aws_iam_role_policy" "iac_drift_tfstate" {
   role   = aws_iam_role.iac_drift.id
   policy = data.aws_iam_policy_document.iac_drift_tfstate.json
 }
+
+# Expose the ARN so AWS_IAC_GUARD_ROLE_ARN can be verified against IaC (issue #50).
+output "iac_guard_role_arn" {
+  description = "ARN of the carto-iac-drift OIDC role used by the iac-guard workflow. AWS_IAC_GUARD_ROLE_ARN must equal this value."
+  value       = aws_iam_role.iac_drift.arn
+}
