@@ -4,7 +4,8 @@ name: iac-guard
 # as safe-additive (pass) or not (fail). The fleet auto-merge gate requires
 # this check passing before a scope:iac PR may auto-merge; absent or red, the
 # PR is held hold:iac-unverified for a human. Role: carto-iac-drift (read-only;
-# trust includes the pull_request OIDC sub).
+# trust gated on the iac-plan GitHub Environment — human-approved, no fork access).
+# AWS_IAC_GUARD_ROLE_ARN must equal: terraform output -raw iac_guard_role_arn
 
 on:
   pull_request:
