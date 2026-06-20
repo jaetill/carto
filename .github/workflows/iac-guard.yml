@@ -13,12 +13,12 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # AWS OIDC (read-only plan role)
+  id-token: write # AWS OIDC (read-only plan role)
   checks: read
 
 jobs:
   guard:
-    uses: jaetill/agentic-dev-environment/.github/workflows/iac-guard.yml@main
+    uses: jaetill/agentic-dev-environment/.github/workflows/iac-guard.yml@2f6154140e23cf1607dd0977ad85de5a7f142d1f # main
     with:
       tf-dir: terraform/envs/prod
       aws-region: us-east-2
