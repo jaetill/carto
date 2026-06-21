@@ -1,8 +1,16 @@
 name: claude-dep-watcher
 # Thin caller (ADR-0018 / ADR-0045) - dep-watch lives in the platform reusable:
 # jaetill/agentic-dev-environment/.github/workflows/dep-watch.yml
-# The reusable runs the LLM agent read-only and publishes the rolling report
-# via a separate deterministic job (writer != publisher).
+# The reusable runs the LLM agent read-only (contents: read, no git commands)
+# and publishes the rolling report via a separate deterministic publish job
+# (no LLM, hard-coded branch target `reports/dep-watch`). This writer ≠ publisher
+# separation (ADR-0045) closes the git-push injection vector from issue #34.
+#
+# ADR-0048 (secrets scoping): dep-watch.yml does not yet declare a secrets:
+# block, so `secrets: inherit` is required — explicit scoping is not possible
+# until the platform reusable adds the declaration. The reusable only consumes
+# CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY; all other carto secrets
+# (FLEET_APP_ID, FLEET_APP_PRIVATE_KEY, etc.) flow in but are not used.
 
 on:
   schedule:
@@ -10,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # ceiling for the reusable's publish job; generate job downgrades to read
+  contents: write # ceiling for the reusable's publish job; generate job downgrades to read
   id-token: write
 
 jobs:
