@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.1](https://github.com/jaetill/carto/compare/v1.1.0...v1.1.1) (2026-06-21)
+
+
+### Bug Fixes
+
+* **ci:** pin iac-guard reusable ref to immutable SHA (ADR-0048) ([#75](https://github.com/jaetill/carto/issues/75)) ([3c4d9ad](https://github.com/jaetill/carto/commit/3c4d9ad8a9a092a8e74003bd8f5f4f030ef640b9)), closes [#49](https://github.com/jaetill/carto/issues/49)
+* **iac:** expose iac_guard_role_arn output so AWS_IAC_GUARD_ROLE_ARN is auditable ([#50](https://github.com/jaetill/carto/issues/50)) ([#76](https://github.com/jaetill/carto/issues/76)) ([f3a13b2](https://github.com/jaetill/carto/commit/f3a13b249f9b02abc8df8c1d37585f15d5bc77a5))
+* **iam:** restore branch-level enforcement to OIDC trust via ref condition ([#78](https://github.com/jaetill/carto/issues/78)) ([bcb13a4](https://github.com/jaetill/carto/commit/bcb13a42b44f61e64a6a1fb319eca722cf3d5b6a)), closes [#30](https://github.com/jaetill/carto/issues/30)
+
 ## [1.1.0](https://github.com/jaetill/carto/compare/v1.0.0...v1.1.0) (2026-06-18)
 
 
