@@ -90,8 +90,12 @@ resource "aws_iam_role" "github_deploy" {
         Action    = "sts:AssumeRoleWithWebIdentity"
         Condition = {
           StringEquals = {
-            "token.actions.githubusercontent.com:sub" = ["repo:jaetill/carto:ref:refs/heads/master", "repo:jaetill/carto:environment:production"]
+            "token.actions.githubusercontent.com:sub" = "repo:jaetill/carto:environment:production"
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+            # Restore branch-level enforcement at IAM layer; the deploy job
+            # issues an environment-scoped sub (not a ref-scoped sub), so the
+            # old ref entry in sub was unreachable and provided no protection.
+            "token.actions.githubusercontent.com:ref" = "refs/heads/master"
           }
         }
       }
