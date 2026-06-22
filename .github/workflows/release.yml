@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   release:
-    uses: jaetill/agentic-dev-environment/.github/workflows/release.yml@main
+    uses: jaetill/agentic-dev-environment/.github/workflows/release.yml@91f01e8b45046d6a8b0cc7fd2370d4fe15e073d4 # main
     with:
       release-type: node
     secrets: inherit
