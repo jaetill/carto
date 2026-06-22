@@ -6,6 +6,11 @@ name: claude-dep-watcher
 # (no LLM, hard-coded branch target `reports/dep-watch`). This writer ≠ publisher
 # separation (ADR-0045) closes the git-push injection vector from issue #34.
 #
+# issues: write is NOT required (#44): the platform reusable publishes its
+# rolling report as docs/dependency-report.md on the reports/dep-watch branch
+# (ADR-0045 — digest issues were retired). No GITHUB_TOKEN issue operations
+# are performed; contents: write covers the publish job's branch push.
+#
 # ADR-0048 (secrets scoping): dep-watch.yml does not yet declare a secrets:
 # block, so `secrets: inherit` is required — explicit scoping is not possible
 # until the platform reusable adds the declaration. The reusable only consumes
