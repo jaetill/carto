@@ -39,7 +39,7 @@
                     "vite": "^7.0.0",
                     "vite-plugin-singlefile": "^2.3.0",
                     "vitest": "^2.0.0",
-                    "@tailwindcss/vite": "^4.2.1",
+                    "@tailwindcss/vite": "^4.3.1",
                     "tailwindcss": "^4.2.1"
           }
 }
