@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.2](https://github.com/jaetill/carto/compare/v1.1.1...v1.1.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* **ci:** add npm dependency scanning for root and lambda packages (closes [#83](https://github.com/jaetill/carto/issues/83)) ([#92](https://github.com/jaetill/carto/issues/92)) ([a128b6c](https://github.com/jaetill/carto/commit/a128b6cec4cef98de3b1db1e87b178d00cdc81b9))
+* **ci:** drop unused IMPLEMENTER_PAT forwarding from implementer caller (refs [#363](https://github.com/jaetill/carto/issues/363)) ([#107](https://github.com/jaetill/carto/issues/107)) ([57f5421](https://github.com/jaetill/carto/commit/57f5421d46e471c86bfcabfc16a5854686733c14))
+* **ci:** pin reusable workflow refs to immutable SHAs (closes [#45](https://github.com/jaetill/carto/issues/45)) ([#80](https://github.com/jaetill/carto/issues/80)) ([259b49d](https://github.com/jaetill/carto/commit/259b49d9d77b0a892bb2bf614d39a58e2026a1db))
+* **config:** set DEBUG_MODE=false so production builds use real data ([#106](https://github.com/jaetill/carto/issues/106)) ([08996af](https://github.com/jaetill/carto/commit/08996afaeb02643a4df06dd82c4fc6930b738c12)), closes [#105](https://github.com/jaetill/carto/issues/105)
+* **deps:** enable Dependabot npm scanning for root and Lambda packages ([#91](https://github.com/jaetill/carto/issues/91)) ([5dea711](https://github.com/jaetill/carto/commit/5dea71149578348be224a46aafffae3825039821)), closes [#81](https://github.com/jaetill/carto/issues/81)
+
 ## [1.1.1](https://github.com/jaetill/carto/compare/v1.1.0...v1.1.1) (2026-06-21)
 
 
