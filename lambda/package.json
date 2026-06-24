@@ -7,6 +7,6 @@
     "@aws-sdk/client-s3": "^3.750.0",
     "@octokit/rest": "^21.0.0",
     "@sentry/aws-serverless": "^9.0.0",
-    "neo4j-driver": "^5.28.1"
+    "neo4j-driver": "^6.1.0"
   }
 }
