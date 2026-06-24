@@ -1,4 +1,4 @@
-export const DEBUG_MODE = true;
+export const DEBUG_MODE = false;
 
 export const API_BASE = 'https://9o7c3668a4.execute-api.us-east-2.amazonaws.com/prod';
 
