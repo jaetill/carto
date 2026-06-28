@@ -10,19 +10,18 @@ const REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'jaetill';
 const REPO_NAME = process.env.GITHUB_REPO_NAME || 'carto';
 const SECRET_ID = process.env.GITHUB_SECRET_ID || 'carto/github-token';
 
-const ALLOWED_ORIGINS = new Set([
-  'https://carto.jaetill.com',
-  'http://localhost:5173',
-]);
+const ALLOWED_ORIGINS = new Set(['https://carto.jaetill.com', 'http://localhost:5173']);
 
-const SAFE_PAGE_ENTRIES = [
-  { origin: 'https://carto.jaetill.com', pathPrefix: '' },
-];
+const SAFE_PAGE_ENTRIES = [{ origin: 'https://carto.jaetill.com', pathPrefix: '' }];
 
 function isSafePageUrl(url) {
   if (typeof url !== 'string') return false;
   let parsed;
-  try { parsed = new URL(url); } catch { return false; }
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
   return SAFE_PAGE_ENTRIES.some((e) => parsed.origin === e.origin);
 }
 
@@ -44,7 +43,10 @@ function makeRateLimiter() {
       return { allowed: true };
     }
     if (existing.count >= LIMIT) {
-      return { allowed: false, retryAfter: Math.ceil((WINDOW_MS - (now - existing.windowStart)) / 1000) };
+      return {
+        allowed: false,
+        retryAfter: Math.ceil((WINDOW_MS - (now - existing.windowStart)) / 1000),
+      };
     }
     existing.count += 1;
     return { allowed: true };
@@ -64,7 +66,10 @@ function validate(input) {
   if (input.description.length < 10 || input.description.length > 2000) {
     return 'description must be 10-2000 characters';
   }
-  if (input.email !== undefined && (typeof input.email !== 'string' || !input.email.includes('@'))) {
+  if (
+    input.email !== undefined &&
+    (typeof input.email !== 'string' || !input.email.includes('@'))
+  ) {
     return 'email must be a valid email address';
   }
   return null;
@@ -73,7 +78,9 @@ function validate(input) {
 function corsHeaders(event) {
   const origin = event.headers?.origin || event.headers?.Origin || '';
   return {
-    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : 'https://carto.jaetill.com',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin)
+      ? origin
+      : 'https://carto.jaetill.com',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'POST,OPTIONS',
     'Content-Type': 'application/json',
@@ -107,7 +114,7 @@ async function getOctokit() {
   return _octokit;
 }
 
-export const handler = Sentry.wrapHandler(async (event, context) => {
+export async function handler(event, context) {
   logger.info('handler.invoked', { request_id: context?.awsRequestId });
 
   const CORS = corsHeaders(event);
@@ -119,14 +126,19 @@ export const handler = Sentry.wrapHandler(async (event, context) => {
   const ip = event.requestContext?.identity?.sourceIp || 'unknown';
   const rl = checkRateLimit(ip);
   if (!rl.allowed) {
-    return respond(429,
+    return respond(
+      429,
       { error: 'rate_limited', retry_after_seconds: rl.retryAfter },
       { ...CORS, 'Retry-After': String(rl.retryAfter) },
     );
   }
 
   let body;
-  try { body = JSON.parse(event.body || '{}'); } catch { return respond(400, { error: 'invalid_json' }, CORS); }
+  try {
+    body = JSON.parse(event.body || '{}');
+  } catch {
+    return respond(400, { error: 'invalid_json' }, CORS);
+  }
 
   if (typeof body.website === 'string' && body.website.length > 0) {
     return respond(201, { id: `FB-DROPPED-${Date.now()}`, status: 'received' }, CORS);
@@ -135,20 +147,29 @@ export const handler = Sentry.wrapHandler(async (event, context) => {
   const violation = validate(body);
   if (violation) return respond(400, { error: 'validation_error', detail: violation }, CORS);
 
-  const titleBody = body.description.length > 60 ? body.description.slice(0, 60).trim() + '...' : body.description;
+  const titleBody =
+    body.description.length > 60 ? body.description.slice(0, 60).trim() + '...' : body.description;
   const issueTitle = `[${body.type}] ${escapeMarkdown(titleBody)}`;
   const issueBody = [
-    '## Description', escapeMarkdown(body.description), '',
+    '## Description',
+    escapeMarkdown(body.description),
+    '',
     '## Context',
-    body.page_url && isSafePageUrl(body.page_url) ? `- Page: ${escapeMarkdown(body.page_url)}` : null,
+    body.page_url && isSafePageUrl(body.page_url)
+      ? `- Page: ${escapeMarkdown(body.page_url)}`
+      : null,
     body.user_agent ? `- UA: ${escapeMarkdown(body.user_agent)}` : null,
     body.email ? `- Email: ${escapeMarkdown(body.email)}` : null,
     `- Source IP: ${ip}`,
     `- Lambda request: ${context?.awsRequestId || 'unknown'}`,
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   let octokit;
-  try { octokit = await getOctokit(); } catch (err) {
+  try {
+    octokit = await getOctokit();
+  } catch (err) {
     logger.error('feedback.secrets_failed', { error: err.message });
     Sentry.captureException(err);
     return respond(500, { error: 'configuration_error' }, CORS);
@@ -170,4 +191,4 @@ export const handler = Sentry.wrapHandler(async (event, context) => {
     Sentry.captureException(err);
     return respond(502, { error: 'github_issue_creation_failed' }, CORS);
   }
-});
+}
