@@ -1,6 +1,7 @@
 # Carto — Claude Context
 
 ## What this app is
+
 A penetration testing engagement management platform. Imports and parses output
 from security tools (Nmap, Metasploit, Nessus, SharpHound, Nuclei, Ghostwriter),
 maps hosts/connections/users/credentials into a Neo4j graph database, and
@@ -10,6 +11,7 @@ use — not a multi-tenant SaaS.
 Hosted at **https://carto.jaetill.com**.
 
 ## Tech stack
+
 - **Frontend**: Vite + Tailwind SPA. Two build modes:
   - `cloud` (default) — Cognito auth + API Gateway backend
   - `standalone` — localStorage only, single bundled HTML file (`dist-local/`)
@@ -28,21 +30,23 @@ Hosted at **https://carto.jaetill.com**.
   All API routes require Cognito JWT in `Authorization` header.
 
 ## AWS resources
-| Resource | Value |
-|---|---|
-| S3 bucket | `jaetill-carto` |
-| CloudFront distribution | `E36OPEPVLCLUYJ` → `carto.jaetill.com` |
-| API Gateway | `9o7c3668a4` (prod stage) |
-| Cognito user pool | `us-east-2_xneeJzaDJ` (shared with portal, meal-planner, game-night) |
-| Cognito web client | `3r633l045s8fse9v1ebubk8re6` |
-| Cognito branding | `ffc6f1fe-5324-4e48-aee3-3788635546f8` |
-| API GW Cognito authorizer | `b7mlmb` |
-| Lambda function | `cartoApi` |
-| Lambda execution role | `cartoApi-role` |
-| GitHub deploy role | `carto-github-deploy` (OIDC) |
-| Region | `us-east-2` |
+
+| Resource                  | Value                                                                |
+| ------------------------- | -------------------------------------------------------------------- |
+| S3 bucket                 | `jaetill-carto`                                                      |
+| CloudFront distribution   | `E36OPEPVLCLUYJ` → `carto.jaetill.com`                               |
+| API Gateway               | `9o7c3668a4` (prod stage)                                            |
+| Cognito user pool         | `us-east-2_xneeJzaDJ` (shared with portal, meal-planner, game-night) |
+| Cognito web client        | `3r633l045s8fse9v1ebubk8re6`                                         |
+| Cognito branding          | `ffc6f1fe-5324-4e48-aee3-3788635546f8`                               |
+| API GW Cognito authorizer | `b7mlmb`                                                             |
+| Lambda function           | `cartoApi`                                                           |
+| Lambda execution role     | `cartoApi-role`                                                      |
+| GitHub deploy role        | `carto-github-deploy` (OIDC)                                         |
+| Region                    | `us-east-2`                                                          |
 
 ## Lambda config (`cartoApi`)
+
 **Env vars:**
 | Var | Purpose |
 |---|---|
@@ -54,37 +58,40 @@ Hosted at **https://carto.jaetill.com**.
 cold start (~50-100ms) and cached in memory for reuse across warm invocations.
 
 ## API routes (`9o7c3668a4/prod`)
+
 All routes require `Authorization: {CognitoIdToken}` header. All handled by
 `cartoApi` Lambda via path detection in `lambda/index.mjs`.
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/engagements` | List all engagements |
-| POST | `/engagements` | Save full engagements list |
-| GET | `/engagement/{id}/data` | Load hosts, notes, credentials |
-| POST | `/engagement/{id}/data` | Save hosts/notes/credentials (triggers Neo4j sync) |
-| GET | `/engagement/{id}/snapshots` | Load command snapshots |
-| POST | `/engagement/{id}/snapshots` | Save snapshots (triggers Neo4j sync) |
-| GET | `/engagement/{id}/imports` | Load tool imports |
-| POST | `/engagement/{id}/imports` | Save imports (triggers Neo4j sync) |
-| GET | `/engagement/{id}/graph` | Get topology graph from Neo4j |
-| GET | `/engagement/{id}/graph/paths` | Get attack paths from Neo4j |
-| POST | `/engagement/{id}/graph/paths` | Add custom attack path |
-| POST | `/engagement/{id}/graph/paths/delete` | Remove attack path |
-| POST | `/engagement/{id}/graph/sync` | Force full Neo4j resync |
+| Method | Path                                  | Purpose                                            |
+| ------ | ------------------------------------- | -------------------------------------------------- |
+| GET    | `/engagements`                        | List all engagements                               |
+| POST   | `/engagements`                        | Save full engagements list                         |
+| GET    | `/engagement/{id}/data`               | Load hosts, notes, credentials                     |
+| POST   | `/engagement/{id}/data`               | Save hosts/notes/credentials (triggers Neo4j sync) |
+| GET    | `/engagement/{id}/snapshots`          | Load command snapshots                             |
+| POST   | `/engagement/{id}/snapshots`          | Save snapshots (triggers Neo4j sync)               |
+| GET    | `/engagement/{id}/imports`            | Load tool imports                                  |
+| POST   | `/engagement/{id}/imports`            | Save imports (triggers Neo4j sync)                 |
+| GET    | `/engagement/{id}/graph`              | Get topology graph from Neo4j                      |
+| GET    | `/engagement/{id}/graph/paths`        | Get attack paths from Neo4j                        |
+| POST   | `/engagement/{id}/graph/paths`        | Add custom attack path                             |
+| POST   | `/engagement/{id}/graph/paths/delete` | Remove attack path                                 |
+| POST   | `/engagement/{id}/graph/sync`         | Force full Neo4j resync                            |
 
 ## Lambda files (`lambda/`)
-All files are ES modules (`.mjs`). Lambda has its own `package.json` with
-`neo4j-driver` and `@aws-sdk/client-s3` — these are bundled into the zip.
 
-| File | Purpose |
-|---|---|
-| `index.mjs` | Entry point — routes requests by path to handlers |
-| `s3.mjs` | `s3Get(key)` / `s3Put(key, data)` helpers for `jaetill-carto` bucket |
+All files are ES modules (`.mjs`). Lambda has its own `package.json` with
+`neo4j-driver`, `@aws-sdk/client-s3`, and `@aws-sdk/client-secrets-manager` — these are bundled into the zip.
+
+| File        | Purpose                                                                    |
+| ----------- | -------------------------------------------------------------------------- |
+| `index.mjs` | Entry point — routes requests by path to handlers                          |
+| `s3.mjs`    | `s3Get(key)` / `s3Put(key, data)` helpers for `jaetill-carto` bucket       |
 | `graph.mjs` | All Neo4j Cypher operations (sync hosts, connections, users, creds, paths) |
-| `sync.mjs` | Parses snapshots/imports → extracts relationships → calls graph.mjs |
+| `sync.mjs`  | Parses snapshots/imports → extracts relationships → calls graph.mjs        |
 
 ## S3 data layout
+
 ```
 engagements.json                          — array of engagement metadata
 engagements/{engagementId}/data.json      — { hosts, notes, credentials }
@@ -96,6 +103,7 @@ engagements/{engagementId}/imports.json   — array of tool imports
 and `engagements/*` from sync.
 
 ## Frontend source (`src/js/`)
+
 ```
 app.js                        — init, nav, sidebar, auth guard
 app.local.js                  — standalone mode variant
@@ -123,6 +131,7 @@ ui/toast.js                   — toast notifications
 ```
 
 ## Deployment
+
 - `deploy.yml` on push to `master`
 - Frontend build: `npm run build` → sync `dist/` to `jaetill-carto` S3
   - **Excludes `engagements.json` and `engagements/*`** to protect engagement data
@@ -131,6 +140,7 @@ ui/toast.js                   — toast notifications
 - CloudFront invalidation on `/*`
 
 ## Key gotchas
+
 - Lambda uses **ES modules** — all Lambda files are `.mjs`, use `import`/`export`.
   Do not use `require()` or CommonJS patterns.
 - Lambda zip **must include `node_modules`** (neo4j-driver is not available in
@@ -141,7 +151,6 @@ ui/toast.js                   — toast notifications
   differently in cloud vs standalone mode.
 - The standalone build (`npm run build:local`) produces a single self-contained
   HTML file for offline use — no AWS dependencies.
-
 
 ---
 
