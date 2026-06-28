@@ -9,7 +9,7 @@ vi.mock('../lambda/feedback.mjs', () => ({
 }));
 
 vi.mock('../lambda/lib/sentry.mjs', () => ({
-  Sentry: { wrapHandler: (fn) => fn },
+  Sentry: { wrapHandler: vi.fn((fn) => fn) },
 }));
 
 vi.mock('../lambda/s3.mjs', () => ({ s3Get: vi.fn(), s3Put: vi.fn() }));
@@ -29,9 +29,13 @@ vi.mock('../lambda/sync.mjs', () => ({
 describe('lambda/index.mjs — feedback routing', () => {
   let handler;
   let feedbackHandler;
+  let wrapHandler;
 
   beforeEach(async () => {
     vi.resetModules();
+    const sentryMod = await import('../lambda/lib/sentry.mjs');
+    wrapHandler = sentryMod.Sentry.wrapHandler;
+    wrapHandler.mockClear();
     const indexMod = await import('../lambda/index.mjs');
     const feedbackMod = await import('../lambda/feedback.mjs');
     handler = indexMod.handler;
@@ -82,5 +86,11 @@ describe('lambda/index.mjs — feedback routing', () => {
 
     expect(result.statusCode).toBe(403);
     expect(result.body).toContain('carto-users');
+  });
+
+  it('Sentry.wrapHandler is called exactly once — feedback.mjs must not wrap its own handler', () => {
+    // index.mjs wraps the top-level export once; feedback.mjs must export a plain
+    // async function so that /feedback requests do not open a second Sentry transaction.
+    expect(wrapHandler).toHaveBeenCalledTimes(1);
   });
 });
