@@ -10,13 +10,18 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 
 const smClient = new SecretsManagerClient({ region: 'us-east-2' });
 
-// ── Secrets (cached per cold start) ──────────────────────
+// ── Secrets (TTL-cached: re-fetched after 15 min to pick up rotations) ──
 
 let _secrets;
+let _secretsFetchedAt = 0;
+const SECRETS_TTL_MS = 15 * 60 * 1000;
+
 async function getSecrets() {
-  if (!_secrets) {
+  if (!_secrets || Date.now() - _secretsFetchedAt > SECRETS_TTL_MS) {
     const res = await smClient.send(new GetSecretValueCommand({ SecretId: 'carto/secrets' }));
     _secrets = JSON.parse(res.SecretString);
+    _secretsFetchedAt = Date.now();
+    _driver = null; // force driver reconnect with fresh credentials
   }
   return _secrets;
 }
@@ -26,8 +31,9 @@ async function getSecrets() {
 let _driver = null;
 
 async function getDriver() {
+  // Always call getSecrets() so TTL expiry can null _driver and trigger reconnect.
+  const secrets = await getSecrets();
   if (!_driver) {
-    const secrets = await getSecrets();
     _driver = neo4j.driver(
       process.env.NEO4J_URI,
       neo4j.auth.basic(process.env.NEO4J_USERNAME, secrets.NEO4J_PASSWORD),
@@ -54,22 +60,19 @@ function toInt(val) {
   return val;
 }
 
-function nodeProps(rec, key) {
-  const node = rec.get(key);
-  if (!node) return null;
-  const p = { ...node.properties };
-  // Normalize all integer values
-  for (const k of Object.keys(p)) p[k] = toInt(p[k]) ?? p[k];
-  return p;
-}
-
 // ── Engagement ────────────────────────────────────────────
 
 export async function syncEngagement(eng) {
   await run(
     `MERGE (e:Engagement {id: $id})
      SET e.name = $name, e.client = $client, e.status = $status, e.startDate = $startDate`,
-    { id: eng.id, name: eng.name || '', client: eng.client || '', status: eng.status || 'active', startDate: eng.startDate || '' },
+    {
+      id: eng.id,
+      name: eng.name || '',
+      client: eng.client || '',
+      status: eng.status || 'active',
+      startDate: eng.startDate || '',
+    },
   );
 }
 
@@ -93,13 +96,13 @@ export async function syncHosts(engagementId, hosts) {
          host.status       = h.status`,
     {
       engagementId,
-      hosts: hosts.map(h => ({
-        id:       h.id,
-        ip:       h.ip       || '',
+      hosts: hosts.map((h) => ({
+        id: h.id,
+        ip: h.ip || '',
         hostname: h.hostname || '',
-        os:       h.os       || '',
+        os: h.os || '',
         osFamily: h.osFamily || 'unknown',
-        status:   h.status   || 'observed',
+        status: h.status || 'observed',
       })),
     },
   );
@@ -291,7 +294,10 @@ export async function syncShares(shares) {
 
 // ── Attack Paths ──────────────────────────────────────────
 
-export async function addAttackPath(engagementId, { edgeId, fromHostId, toHostId, technique, notes, timestamp }) {
+export async function addAttackPath(
+  engagementId,
+  { edgeId, fromHostId, toHostId, technique, notes, timestamp },
+) {
   await run(
     `MATCH (src:Host {id: $fromHostId}), (dst:Host {id: $toHostId})
      MERGE (src)-[r:ATTACK_PATH {edgeId: $edgeId}]->(dst)
@@ -305,17 +311,14 @@ export async function addAttackPath(engagementId, { edgeId, fromHostId, toHostId
       toHostId,
       engagementId,
       technique: technique || '',
-      notes:     notes     || '',
+      notes: notes || '',
       timestamp: timestamp || Date.now(),
     },
   );
 }
 
 export async function removeAttackPath(edgeId) {
-  await run(
-    `MATCH ()-[r:ATTACK_PATH {edgeId: $edgeId}]->() DELETE r`,
-    { edgeId },
-  );
+  await run(`MATCH ()-[r:ATTACK_PATH {edgeId: $edgeId}]->() DELETE r`, { edgeId });
 }
 
 // ── Query: Topology ───────────────────────────────────────
@@ -360,35 +363,35 @@ export async function getTopology(engagementId) {
   ]);
 
   return {
-    nodes: hostRecs.map(r => ({
-      id:            r.get('id'),
-      ip:            r.get('ip'),
-      hostname:      r.get('hostname'),
-      os:            r.get('os'),
-      osFamily:      r.get('osFamily'),
-      status:        r.get('status'),
-      subnets:       r.get('subnets'),
+    nodes: hostRecs.map((r) => ({
+      id: r.get('id'),
+      ip: r.get('ip'),
+      hostname: r.get('hostname'),
+      os: r.get('os'),
+      osFamily: r.get('osFamily'),
+      status: r.get('status'),
+      subnets: r.get('subnets'),
       openPortCount: toInt(r.get('openPortCount')),
     })),
-    edges: connRecs.map(r => ({
-      source:   r.get('source'),
-      target:   r.get('target'),
-      port:     toInt(r.get('port')),
+    edges: connRecs.map((r) => ({
+      source: r.get('source'),
+      target: r.get('target'),
+      port: toInt(r.get('port')),
       protocol: r.get('protocol'),
-      state:    r.get('state'),
+      state: r.get('state'),
     })),
-    subnets: subnetRecs.map(r => r.get('cidr')),
-    users: userRecs.map(r => ({
-      id:       r.get('id'),
+    subnets: subnetRecs.map((r) => r.get('cidr')),
+    users: userRecs.map((r) => ({
+      id: r.get('id'),
       username: r.get('username'),
-      domain:   r.get('domain'),
-      isAdmin:  r.get('isAdmin'),
+      domain: r.get('domain'),
+      isAdmin: r.get('isAdmin'),
     })),
-    userEdges: userEdgeRecs.map(r => ({
-      userId:  r.get('userId'),
-      hostId:  r.get('hostId'),
-      type:    r.get('relType'),   // 'IS_LOCAL_ADMIN' | 'HAS_SESSION'
-      fromIp:  r.get('fromIp'),
+    userEdges: userEdgeRecs.map((r) => ({
+      userId: r.get('userId'),
+      hostId: r.get('hostId'),
+      type: r.get('relType'), // 'IS_LOCAL_ADMIN' | 'HAS_SESSION'
+      fromIp: r.get('fromIp'),
     })),
   };
 }
@@ -413,14 +416,14 @@ export async function getAttackPaths(engagementId) {
     { engagementId },
   );
 
-  return records.map(r => ({
-    edgeId:    r.get('edgeId'),
-    source:    r.get('source'),
-    target:    r.get('target'),
-    srcLabel:  r.get('srcHostname') || r.get('srcIp'),
-    dstLabel:  r.get('dstHostname') || r.get('dstIp'),
+  return records.map((r) => ({
+    edgeId: r.get('edgeId'),
+    source: r.get('source'),
+    target: r.get('target'),
+    srcLabel: r.get('srcHostname') || r.get('srcIp'),
+    dstLabel: r.get('dstHostname') || r.get('dstIp'),
     technique: r.get('technique'),
-    notes:     r.get('notes'),
+    notes: r.get('notes'),
     timestamp: toInt(r.get('timestamp')),
   }));
 }

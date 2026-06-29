@@ -1,10 +1,25 @@
 import { defineConfig } from 'vitest/config';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 // Vitest configuration per platform ADR-0004 — tiered coverage thresholds.
 // The project's existing tests live at tests/*.test.js and use happy-dom.
 // Default behavior preserves what the project already has.
 
 export default defineConfig({
+  resolve: {
+    // Lambda packages not installed in root node_modules (runtime-provided or lambda-only).
+    // Stubs let Vite resolve the import paths; vi.mock() factories override them at test time.
+    alias: {
+      '@aws-sdk/client-secrets-manager': resolve(
+        __dirname,
+        'tests/stubs/aws-sdk-client-secrets-manager.mjs',
+      ),
+      'neo4j-driver': resolve(__dirname, 'tests/stubs/neo4j-driver.mjs'),
+    },
+  },
   test: {
     environment: 'happy-dom',
     globals: true,
