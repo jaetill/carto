@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   run:
-    uses: jaetill/agentic-dev-environment/.github/workflows/claude-implementer-reusable.yml@main
+    uses: jaetill/agentic-dev-environment/.github/workflows/claude-implementer-reusable.yml@91f01e8b45046d6a8b0cc7fd2370d4fe15e073d4 # main
     with:
       issue_number: ${{ inputs.issue_number }}
       mode: ${{ inputs.mode }}
