@@ -1,64 +1,59 @@
-## Dependency Watch (2026-07-06)
+## Dependency Watch (2026-07-13)
 
 ---
 
 ### `package.json` (root — frontend)
 
-#### Security Advisories
-None. `npm audit` reports 0 vulnerabilities across 21 production dependencies.
-
-#### Major Version Bumps
-None.
+**Audit:** 0 vulnerabilities in production dependencies.
 
 #### Minor / Patch Updates (low priority — batch in monthly sweep)
-| Package | Declared Range | Latest Available |
-|---|---|---|
-| `@sentry/browser` | `^10.53.1` | `10.63.0` |
-| `cytoscape` | `^3.31.0` | `3.34.0` |
 
-`jszip` is current (`3.10.1`).
+| Package | Installed Range | Wanted | Latest |
+|---|---|---|---|
+| `@sentry/browser` | `^10.53.1` | 10.65.0 | 10.65.0 |
+| `cytoscape` | `^3.31.0` | 3.34.0 | 3.34.0 |
+| `jszip` | `^3.10.1` | 3.10.1 | 3.10.1 |
+
+All three are minor/patch bumps within the same major version. No breaking-change risk. Safe to `npm update` in bulk.
 
 ---
 
 ### `lambda/package.json` (Lambda — backend)
 
+**Audit:** 18 moderate vulnerabilities (all transitive, rooted in `@opentelemetry/core <2.8.0`).
+
 #### Security Advisories — Moderate
 
-**Advisory GHSA-8988-4f7v-96qf — `@opentelemetry/core` Unbounded Memory Allocation**
-- **CVSS:** 5.3 (AV:N/AC:L/PR:N/UI:N — remotely exploitable, no auth)
-- **CWE:** CWE-770 (Allocation of Resources Without Limits or Throttling)
-- **Affected range:** `@opentelemetry/core` < 2.8.0
-- **Root cause:** `@sentry/aws-serverless` ≤ 9.47.1 pulls in a vulnerable transitive
-  `@opentelemetry/core`. All 18 vulnerable packages (`@opentelemetry/instrumentation-*`,
-  `@sentry/node`, etc.) trace back to this single root.
-- **Fix:** Upgrade `@sentry/aws-serverless` from `^9.0.0` → `^10.63.0` (major bump).
-  The fix is marked `isSemVerMajor: true` — review Sentry v9→v10 migration guide before updating.
+| Advisory | CVE/GHSA | CVSS | Direct dep to update | Fix |
+|---|---|---|---|---|
+| OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation | [GHSA-8988-4f7v-96qf](https://github.com/advisories/GHSA-8988-4f7v-96qf) | 5.3 (Medium) | `@sentry/aws-serverless` | Upgrade to `^10.65.0` (major bump 9→10) |
 
-> Although severity is Moderate (not High/Critical), the attack vector is network-accessible
-> and no authentication is required. Recommend addressing in the next planned Lambda deploy.
+**Root cause:** `@sentry/aws-serverless@9.x` pulls in `@opentelemetry/core <2.8.0` which has an unbounded memory allocation issue reachable via malformed W3C Baggage headers. The fix is gated behind a major version bump (`@sentry/aws-serverless` 9→10). All 18 affected packages (`@sentry/node`, `@opentelemetry/instrumentation-*`, etc.) are transitive — upgrading the direct dep resolves all of them.
 
-#### Major Version Bumps (breaking-change risk — review before updating)
-| Package | Declared Range | Latest | Notes |
+**Action:** Upgrade `@sentry/aws-serverless` to `^10.65.0`. Review [Sentry v10 migration guide](https://docs.sentry.io/platforms/javascript/migration/v9-to-v10/) for breaking changes before deploying.
+
+#### Major Version Bumps (note — breaking-change risk)
+
+| Package | Current Range | Latest | Risk |
 |---|---|---|---|
-| `@sentry/aws-serverless` | `^9.0.0` | `10.63.0` | Also fixes the moderate advisory above — prioritize |
-| `neo4j-driver` | `^5.28.1` | `6.2.0` | Neo4j Driver 6.x may change Bolt protocol or API surface |
-| `@octokit/rest` | `^21.0.0` | `22.0.1` | Review GitHub REST API client breaking changes |
+| `@sentry/aws-serverless` | `^9.0.0` | **10.65.0** | Also resolves security advisory above. Review v10 migration guide. |
+| `neo4j-driver` | `^5.28.1` | **6.2.0** | Major — Neo4j 6.x drops some 5.x APIs. Review [Neo4j Driver 6 changelog](https://github.com/neo4j/neo4j-javascript-driver/blob/HEAD/CHANGELOG.md) before updating. Core Bolt protocol and session/query APIs may have changed. |
+| `@octokit/rest` | `^21.0.0` | **22.0.1** | Major — review Octokit v22 changelog for endpoint or auth changes. |
 
 #### Minor / Patch Updates (low priority — batch in monthly sweep)
-| Package | Declared Range | Latest Available |
-|---|---|---|
-| `@aws-sdk/client-s3` | `^3.750.0` | `3.1079.0` |
+
+| Package | Current Range | Wanted | Latest |
+|---|---|---|---|
+| `@aws-sdk/client-s3` | `^3.750.0` | 3.1085.0 | 3.1085.0 |
+
+Minor version jump within AWS SDK v3 — backward-compatible. Safe to `npm update`.
 
 ---
 
 ### Summary
 
-| Manifest | Critical | High | Moderate | Major Bumps | Minor/Patch |
-|---|---|---|---|---|---|
-| `package.json` (root) | 0 | 0 | 0 | 0 | 2 |
-| `lambda/package.json` | 0 | 0 | 18 | 3 | 1 |
-
-**Recommended actions:**
-1. **Lambda:** Upgrade `@sentry/aws-serverless` `^9.0.0` → `^10.63.0` to resolve all 18 moderate advisories. This is a major bump — consult the [Sentry v9→v10 migration guide](https://docs.sentry.io/platforms/javascript/guides/aws-lambda/migration/v9-to-v10/) before deploying.
-2. **Lambda:** Evaluate `neo4j-driver` 5→6 and `@octokit/rest` 21→22 major bumps on their own schedules; neither has a known CVE but both carry breaking-change risk.
-3. **Root:** Minor bumps for `@sentry/browser` and `cytoscape` — safe to batch into a monthly sweep.
+| Severity | Count | Action |
+|---|---|---|
+| Moderate security advisory | 1 (18 transitive findings) | Upgrade `lambda/@sentry/aws-serverless` 9→10 |
+| Major version bump available | 3 | Evaluate and schedule: `@sentry/aws-serverless`, `neo4j-driver`, `@octokit/rest` |
+| Minor/patch behind | 4 | Batch `npm update` in monthly sweep |
