@@ -18,7 +18,7 @@
                     "prepare": "husky"
           },
           "dependencies": {
-                    "@sentry/browser": "^10.53.1",
+                    "@sentry/browser": "^10.59.0",
                     "cytoscape": "^3.31.0",
                     "jszip": "^3.10.1"
           },
